@@ -18,6 +18,7 @@ public partial class MainWindow
     public ObservableCollection<VendorStatus> Vendors { get; } = [];
     private bool _isRunning;
     private bool _stopRequested;
+    private bool _checkOnly;
     private sealed class VendorRun(string vendor)
     {
         public string Vendor { get; } = vendor;
@@ -45,6 +46,7 @@ public partial class MainWindow
 
     public MainWindow()
     {
+        SourceInitialized += (_, _) => WindowTheme.Apply(this);
         InitializeComponent();
         DataContext = this;
 
@@ -52,7 +54,7 @@ public partial class MainWindow
         Directory.CreateDirectory(logDirectory);
         _scriptPath = Path.Combine(AppContext.BaseDirectory, "Update-Codex.ps1");
         _logPath = Path.Combine(logDirectory, "Update-Codex-last.log");
-        ScriptPathText.Text = _scriptPath;
+        ScriptPathText.ToolTip = $"Скрипт: {_scriptPath}\nЖурналы: {logDirectory}";
 
         foreach (var stage in Stages)
         {
@@ -61,7 +63,8 @@ public partial class MainWindow
 
         foreach (var vendor in Stages.Select(stage => stage.Vendor).Distinct())
         {
-            var status = new VendorStatus(vendor, Path.Combine(logDirectory, $"Update-Codex-{vendor}-last.log"));
+            var status = new VendorStatus(vendor, Path.Combine(logDirectory, $"Update-Codex-{vendor}-last.log"))
+            { Stages = Stages.Where(stage => stage.Vendor == vendor).ToArray() };
             Vendors.Add(status);
             AddVendorTab(status);
             if (File.Exists(status.LogPath))
@@ -89,8 +92,8 @@ public partial class MainWindow
         var log = new TextBox
         {
             IsReadOnly = true, AcceptsReturn = true, Padding = new Thickness(14),
-            Background = new SolidColorBrush(Color.FromRgb(23, 26, 31)),
-            Foreground = new SolidColorBrush(Color.FromRgb(216, 222, 233)),
+            Background = new SolidColorBrush(Color.FromRgb(12, 23, 18)),
+            Foreground = new SolidColorBrush(Color.FromRgb(204, 228, 214)),
             FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 12,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
@@ -99,6 +102,25 @@ public partial class MainWindow
         log.TextChanged += (_, _) => log.ScrollToEnd();
         content.Children.Add(log);
         LogTabs.Items.Add(new TabItem { Header = header, Content = content, DataContext = vendor });
+    }
+
+    private void CheckMode_Changed(object sender, RoutedEventArgs e)
+    {
+        if (RunButton is null || ModeDescriptionText is null) return;
+        var checkOnly = CheckOnlyCheckBox.IsChecked == true;
+        RunButton.Content = checkOnly ? "Проверить всё" : "Обновить всё";
+        ModeDescriptionText.Text = checkOnly
+            ? "Сравнить версии без установки обновлений"
+            : "Проверить и установить обновления; приложения могут быть перезапущены";
+    }
+
+    private static string CheckSummary(IEnumerable<UpdateStage> stages)
+    {
+        var selected = stages.ToArray();
+        var available = selected.Count(stage => stage.CheckResult == "AVAILABLE");
+        var unknown = selected.Count(stage => stage.CheckResult == "UNKNOWN");
+        var absent = selected.Count(stage => stage.CheckResult == "NOT_INSTALLED");
+        return $"Обновлений: {available} · Не удалось сравнить: {unknown} · Не установлено: {absent}";
     }
 
     private async void RunButton_Click(object sender, RoutedEventArgs e)
@@ -122,6 +144,7 @@ public partial class MainWindow
             MessageBox.Show(this, $"Скрипт не найден:\n{_scriptPath}", "AI Updater", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
+        _checkOnly = CheckOnlyCheckBox.IsChecked == true;
         PrepareRun(requestedStage);
         try
         {
@@ -144,7 +167,7 @@ public partial class MainWindow
     {
         var run = new VendorRun(vendor);
         var vendorStatus = Vendors.First(item => item.Name == vendor);
-        vendorStatus.SetStatus("Выполняется", "Запуск проверки обновлений", Brushes.SteelBlue);
+        vendorStatus.SetStatus(_checkOnly ? "Проверка" : "Обновление", "Запуск проверки обновлений", (Brush)FindResource("AccentTextBrush"));
         var temporaryLog = Path.Combine(Path.GetTempPath(), $"AIUpdater-{Guid.NewGuid():N}.log");
         using var process = new Process();
         process.StartInfo = new ProcessStartInfo
@@ -160,6 +183,7 @@ public partial class MainWindow
         foreach (var argument in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", _scriptPath,
                      "-Vendor", vendor, "-LogPath", temporaryLog })
             process.StartInfo.ArgumentList.Add(argument);
+        if (_checkOnly) process.StartInfo.ArgumentList.Add("-CheckOnly");
         if (requestedStage is not null)
         {
             process.StartInfo.ArgumentList.Add("-OnlyStage");
@@ -199,7 +223,15 @@ public partial class MainWindow
             var successful = exitCode == 0 && !run.SawError && !_stopRequested;
             vendorStatus.SetStatus(_stopRequested ? "Остановлено" : successful ? "Готово" : "Ошибка",
                 _stopRequested ? "Остановка запрошена пользователем" : successful ? "Все проверки завершены" : $"Завершено с ошибками (код {exitCode})",
-                _stopRequested ? Brushes.Gray : successful ? Brushes.SeaGreen : Brushes.Firebrick);
+                _stopRequested ? Brushes.LightSlateGray : successful ? (Brush)FindResource("AccentTextBrush") : Brushes.LightCoral);
+            if (_checkOnly && successful)
+            {
+                var selected = Stages.Where(stage => stage.Vendor == vendor && (requestedStage is null || stage == requestedStage)).ToArray();
+                var available = selected.Any(stage => stage.CheckResult == "AVAILABLE");
+                var unknown = selected.Any(stage => stage.CheckResult == "UNKNOWN");
+                vendorStatus.SetStatus(available ? "Есть обновления" : unknown ? "Проверено частично" : "Проверено",
+                    CheckSummary(selected), available ? Brushes.Gold : (Brush)FindResource("AccentTextBrush"));
+            }
             AppendLine(vendorStatus.Detail, vendor);
             _sawError |= run.SawError;
             try { File.Delete(temporaryLog); } catch (IOException) { }
@@ -246,14 +278,15 @@ public partial class MainWindow
         foreach (var vendor in Vendors.Where(item => requestedStage is null || item.Name == requestedStage.Vendor))
         {
             vendor.Log = "";
-            vendor.SetStatus("Ожидание", "Подготовка к запуску", Brushes.Gray);
+            vendor.SetStatus("Ожидание", "Подготовка к запуску", Brushes.LightSlateGray);
         }
 
-        OverallStatusText.Text = requestedStage is null
-            ? "Проверка и установка всех обновлений"
-            : $"Проверка обновления: {requestedStage.Name}";
+        OverallStatusText.Text = _checkOnly
+            ? requestedStage is null ? "Проверка версий без установки обновлений" : $"Только проверка: {requestedStage.Name}"
+            : requestedStage is null ? "Проверка и установка всех обновлений" : $"Обновление: {requestedStage.Name}";
         RunProgressBar.Visibility = Visibility.Visible;
         RunButton.IsEnabled = false;
+        CheckOnlyCheckBox.IsEnabled = false;
         StageItemsControl.IsEnabled = false;
         StopButton.IsEnabled = true;
     }
@@ -364,6 +397,13 @@ public partial class MainWindow
 
     private void UpdateStageFromLine(string line, bool isError, VendorRun run)
     {
+        var check = Regex.Match(line, @"=== CHECK (?<result>AVAILABLE|CURRENT|UNKNOWN|NOT_INSTALLED): (?<stage>.+) ===");
+        if (check.Success)
+        {
+            var checkedStage = Stages.FirstOrDefault(item => item.Vendor == run.Vendor && item.Id == check.Groups["stage"].Value);
+            checkedStage?.SetCheckResult(check.Groups["result"].Value);
+            return;
+        }
         var result = Regex.Match(line, @"=== (?<result>COMPLETED|FAILED): (?<stage>.+) ===");
         if (result.Success)
         {
@@ -373,7 +413,7 @@ public partial class MainWindow
                 finishedStage?.SetFailed();
                 run.SawError = true;
             }
-            else if (finishedStage?.Status != "Ошибка") finishedStage?.SetCompleted();
+            else if (finishedStage?.Status != "Ошибка" && finishedStage?.CheckResult is null) finishedStage?.SetCompleted();
             return;
         }
         var stage = Stages.FirstOrDefault(item => line.Contains($"=== {item.Id} ===", StringComparison.OrdinalIgnoreCase));
@@ -405,8 +445,11 @@ public partial class MainWindow
         OverallStatusText.Text = success
             ? _requestedStage is null ? "Все проверки завершены" : $"Проверка завершена: {_requestedStage.Name}"
             : _stopRequested ? "Обновление остановлено" : $"Завершено с ошибками (код {exitCode})";
-        RunProgressBar.Visibility = Visibility.Collapsed;
+        if (_checkOnly && success)
+            OverallStatusText.Text = CheckSummary(Stages.Where(stage => _requestedStage is null || stage == _requestedStage));
+        RunProgressBar.Visibility = Visibility.Hidden;
         RunButton.IsEnabled = true;
+        CheckOnlyCheckBox.IsEnabled = true;
         StageItemsControl.IsEnabled = true;
         StopButton.IsEnabled = false;
         _isRunning = false;

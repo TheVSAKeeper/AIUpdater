@@ -4,21 +4,21 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
-$publishDirectory = Join-Path $projectRoot 'publish'
+$publishRoot = Join-Path $projectRoot 'publish'
+$publishDirectory = Join-Path $publishRoot ((Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $desktopDirectory = [Environment]::GetFolderPath('DesktopDirectory')
 $logDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AIUpdater\Logs'
 $backupDirectory = Join-Path $projectRoot 'artifacts\desktop-previous'
 
-if (Get-Process -Name AIUpdater -ErrorAction SilentlyContinue) {
-    throw 'Закройте AIUpdater и повторите обновление.'
-}
-
+# Publish to a fresh directory so an open application can keep running.
 & dotnet publish (Join-Path $projectRoot 'AIUpdater.csproj') -c Release --self-contained false -o $publishDirectory
 if ($LASTEXITCODE -ne 0) { throw "Ошибка публикации: $LASTEXITCODE" }
 $executable = Join-Path $publishDirectory 'AIUpdater.exe'
 if (-not (Test-Path -LiteralPath $executable)) { throw "Приложение не найдено: $executable" }
-if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory 'Update-Codex.ps1'))) {
-    throw 'В публикации отсутствует скрипт обновления.'
+foreach ($scriptName in @('Update-Codex.ps1', 'Check-Updates.ps1')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory $scriptName))) {
+        throw "В публикации отсутствует скрипт: $scriptName"
+    }
 }
 
 $shortcutShell = New-Object -ComObject WScript.Shell

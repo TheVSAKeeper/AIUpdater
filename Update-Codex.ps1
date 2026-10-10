@@ -14,6 +14,7 @@
     [string]$OnlyStage,
     [ValidateSet('OpenAI', 'Anthropic', 'Google')]
     [string]$Vendor,
+    [switch]$CheckOnly,
     [string]$LogPath = (Join-Path $PSScriptRoot 'Update-Codex-last.log')
 )
 
@@ -34,7 +35,7 @@ function Test-Admin {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-if (-not (Test-Admin)) {
+if (-not $CheckOnly -and -not (Test-Admin)) {
     $arguments = @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
@@ -139,6 +140,31 @@ function Invoke-LoggedCommand {
 }
 
 function Invoke-CommandCapture {
+    param([string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory, [switch]$NoLogCommand)
+    if ([IO.Path]::GetFileNameWithoutExtension($FilePath) -ne 'winget') {
+        return Invoke-CommandCaptureCore @PSBoundParameters
+    }
+    # Vendor processes share winget's source database and initialization state.
+    $mutex = [Threading.Mutex]::new($false, 'Local\AIUpdater.Winget')
+    $acquired = $false
+    try {
+        try { $acquired = $mutex.WaitOne([TimeSpan]::FromMinutes(2)) }
+        catch [Threading.AbandonedMutexException] { $acquired = $true }
+        if (-not $acquired) { throw 'Timed out waiting for another winget query' }
+        $result = Invoke-CommandCaptureCore @PSBoundParameters
+        if ($result.ExitCode -eq -1978335231) {
+            Write-Log 'winget initialization failed; retrying once'
+            Start-Sleep -Milliseconds 500
+            $result = Invoke-CommandCaptureCore @PSBoundParameters
+        }
+        return $result
+    } finally {
+        if ($acquired) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
+function Invoke-CommandCaptureCore {
     param(
         [string]$FilePath,
         [string[]]$Arguments,
@@ -1293,6 +1319,8 @@ function Invoke-UpdateStep {
 }
 
 try {
+    . (Join-Path $PSScriptRoot 'Check-Updates.ps1')
+    if ($CheckOnly) { Write-Log 'Check-only mode: no installations, marketplace refreshes or application restarts' }
     $script:codexWasStopped = $false
     $script:claudeDesktopWasStopped = $false
     $script:HadFailure = $false
@@ -1314,21 +1342,30 @@ try {
     foreach ($step in $steps.GetEnumerator()) {
         $stepVendor = if ($step.Key -match 'Codex') { 'OpenAI' } elseif ($step.Key -match 'Claude') { 'Anthropic' } else { 'Google' }
         if ((-not $OnlyStage -or $step.Key -eq $OnlyStage) -and (-not $Vendor -or $stepVendor -eq $Vendor)) {
-            Invoke-UpdateStep -Name $step.Key -ScriptBlock $step.Value
+            if ($CheckOnly) {
+                $stageName = $step.Key
+                Invoke-UpdateStep -Name $stageName -ScriptBlock { Invoke-CheckStage $stageName }
+            } else {
+                Invoke-UpdateStep -Name $step.Key -ScriptBlock $step.Value
+            }
         }
     }
 
     if ($script:HadFailure) {
-        Write-Log 'Done with errors; applications closed for updating will remain closed'
+        if ($CheckOnly) { Write-Log 'Done with errors; check-only mode did not change applications' }
+        else { Write-Log 'Done with errors; applications closed for updating will remain closed' }
         exit 1
     }
 
-    Start-CodexProcess
-    Start-ClaudeDesktopProcess
+    if (-not $CheckOnly) {
+        Start-CodexProcess
+        Start-ClaudeDesktopProcess
+    }
     Write-Log 'Done'
 } catch {
-    Write-Log "Update failed: $($_.Exception.Message)"
+    Write-Log "Run failed: $($_.Exception.Message)"
     Write-AppxEvents
-    Write-Log 'Applications closed for updating will remain closed because the update failed'
+    if ($CheckOnly) { Write-Log 'Check-only mode did not change applications' }
+    else { Write-Log 'Applications closed for updating will remain closed because the update failed' }
     exit 1
 }

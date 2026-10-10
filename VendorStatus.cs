@@ -12,6 +12,7 @@ public sealed class VendorStatus(string name, string logPath) : INotifyPropertyC
     private Brush _brush = Brushes.Gray;
 
     public string Name { get; } = name;
+    public IReadOnlyList<UpdateStage> Stages { get; init; } = [];
     public string LogPath { get; } = logPath;
     public string Status { get => _status; private set { _status = value; Notify(); } }
     public string Detail { get => _detail; set { _detail = value; Notify(); } }

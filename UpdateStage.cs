@@ -8,11 +8,12 @@ public sealed class UpdateStage : INotifyPropertyChanged
 {
     private string _status = "Ожидание";
     private Brush _statusBrush = Brushes.Gray;
-    private Brush _indicatorBrush = new SolidColorBrush(Color.FromRgb(191, 198, 207));
+    private Brush _indicatorBrush = new SolidColorBrush(Color.FromRgb(100, 116, 139));
 
     public required string Id { get; init; }
     public required string Name { get; init; }
     public required string Vendor { get; init; }
+    public string? CheckResult { get; private set; }
 
     public string Status
     {
@@ -34,30 +35,50 @@ public sealed class UpdateStage : INotifyPropertyChanged
 
     public void Reset()
     {
+        CheckResult = null;
         Status = "Ожидание";
-        StatusBrush = new SolidColorBrush(Color.FromRgb(103, 113, 126));
-        IndicatorBrush = new SolidColorBrush(Color.FromRgb(191, 198, 207));
+        StatusBrush = new SolidColorBrush(Color.FromRgb(148, 163, 184));
+        IndicatorBrush = new SolidColorBrush(Color.FromRgb(100, 116, 139));
     }
 
     public void SetRunning()
     {
         Status = "Выполняется";
-        StatusBrush = new SolidColorBrush(Color.FromRgb(37, 99, 176));
-        IndicatorBrush = new SolidColorBrush(Color.FromRgb(37, 99, 176));
+        StatusBrush = new SolidColorBrush(Color.FromRgb(110, 231, 183));
+        IndicatorBrush = new SolidColorBrush(Color.FromRgb(110, 231, 183));
     }
 
     public void SetCompleted()
     {
         Status = "Готово";
-        StatusBrush = new SolidColorBrush(Color.FromRgb(22, 118, 90));
-        IndicatorBrush = new SolidColorBrush(Color.FromRgb(22, 118, 90));
+        StatusBrush = new SolidColorBrush(Color.FromRgb(52, 211, 153));
+        IndicatorBrush = new SolidColorBrush(Color.FromRgb(52, 211, 153));
     }
 
     public void SetFailed()
     {
         Status = "Ошибка";
-        StatusBrush = new SolidColorBrush(Color.FromRgb(180, 45, 45));
-        IndicatorBrush = new SolidColorBrush(Color.FromRgb(180, 45, 45));
+        StatusBrush = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+        IndicatorBrush = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+    }
+
+    public void SetCheckResult(string result)
+    {
+        CheckResult = result;
+        Status = result switch
+        {
+            "AVAILABLE" => "Есть обновление",
+            "CURRENT" => "Актуально",
+            "NOT_INSTALLED" => "Не установлено",
+            _ => "Не удалось сравнить"
+        };
+        StatusBrush = result switch
+        {
+            "AVAILABLE" => new SolidColorBrush(Color.FromRgb(251, 191, 36)),
+            "CURRENT" => new SolidColorBrush(Color.FromRgb(52, 211, 153)),
+            _ => new SolidColorBrush(Color.FromRgb(148, 163, 184))
+        };
+        IndicatorBrush = StatusBrush;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
