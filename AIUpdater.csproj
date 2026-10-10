@@ -10,7 +10,6 @@
     <ApplicationIcon>Assets\AIUpdater.ico</ApplicationIcon>
     <AssemblyName>AIUpdater</AssemblyName>
     <RootNamespace>AIUpdater</RootNamespace>
-    <DesktopOutputDirectory>$(USERPROFILE)\Desktop\AIUpdater</DesktopOutputDirectory>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,15 +17,6 @@
     <None Update="Update-Codex.ps1" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <Target Name="CopyBuildToDesktop" AfterTargets="Build">
-    <ItemGroup>
-      <DesktopBuildFiles Include="$(TargetDir)**\*" />
-    </ItemGroup>
-    <MakeDir Directories="$(DesktopOutputDirectory)" />
-    <Copy SourceFiles="@(DesktopBuildFiles)"
-          DestinationFiles="@(DesktopBuildFiles->'$(DesktopOutputDirectory)\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Message Text="AIUpdater copied to $(DesktopOutputDirectory)" Importance="high" />
-  </Target>
+
 
 </Project>

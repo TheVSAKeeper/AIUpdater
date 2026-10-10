@@ -48,9 +48,10 @@ public partial class MainWindow
         InitializeComponent();
         DataContext = this;
 
-        var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AIUpdater", "Logs");
+        Directory.CreateDirectory(logDirectory);
         _scriptPath = Path.Combine(AppContext.BaseDirectory, "Update-Codex.ps1");
-        _logPath = Path.Combine(desktop, "Update-Codex-last.log");
+        _logPath = Path.Combine(logDirectory, "Update-Codex-last.log");
         ScriptPathText.Text = _scriptPath;
 
         foreach (var stage in Stages)
@@ -60,7 +61,7 @@ public partial class MainWindow
 
         foreach (var vendor in Stages.Select(stage => stage.Vendor).Distinct())
         {
-            var status = new VendorStatus(vendor, Path.Combine(desktop, $"Update-Codex-{vendor}-last.log"));
+            var status = new VendorStatus(vendor, Path.Combine(logDirectory, $"Update-Codex-{vendor}-last.log"));
             Vendors.Add(status);
             AddVendorTab(status);
             if (File.Exists(status.LogPath))
