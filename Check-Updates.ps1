@@ -9,7 +9,7 @@ function Compare-CheckVersions {
     param([string]$Stage, $Installed, $Available)
     if ($null -eq $Installed -or $null -eq $Available) {
         Write-CheckResult $Stage 'UNKNOWN' "Version comparison unavailable. Installed: $Installed; latest: $Available"
-    } elseif ($Installed -lt $Available) {
+    } elseif ((Compare-PackageVersions "$Installed" "$Available") -lt 0) {
         Write-CheckResult $Stage 'AVAILABLE' "Update available: $Installed -> $Available"
     } else {
         Write-CheckResult $Stage 'CURRENT' "Up to date: $Installed (latest: $Available)"
@@ -88,7 +88,7 @@ function Test-CliUpdate {
         Write-CheckResult $Stage 'UNKNOWN' 'Global npm package is missing or its version could not be read'
         return
     }
-    $available = Get-NpmLatestVersion $PackageName
+    $available = Get-NpmLatestVersion $PackageName $installed
     Compare-CheckVersions $Stage $installed $available
 }
 

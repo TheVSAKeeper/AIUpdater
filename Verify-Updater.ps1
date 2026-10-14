@@ -197,3 +197,109 @@ Update-ClaudeDesktop
 Update-CodexDesktop
 if ($script:commands.Count) { throw 'Update installed an absent application' }
 Write-Output 'PASS: separate install/remove commands, uninstall errors, absent packages, plugin guard, selected-component dispatch, updates do not install absent apps'
+
+foreach ($case in @(
+    @{ Left = '0.163.0-alpha.5'; Right = '0.163.0-alpha.11'; Expected = -1 },
+    @{ Left = '0.163.0-alpha.11'; Right = '0.163.0-alpha.5'; Expected = 1 },
+    @{ Left = '0.163.0-alpha.5'; Right = '0.162.1'; Expected = 1 },
+    @{ Left = '0.163.0-alpha.5'; Right = '0.163.0'; Expected = -1 },
+    @{ Left = '0.163.0'; Right = '0.163.0-alpha.5'; Expected = 1 },
+    @{ Left = '0.163.0-alpha.5+build.1'; Right = '0.163.0-alpha.5+build.2'; Expected = 0 },
+    @{ Left = '1.0.0-beta.2'; Right = '1.0.0-rc.1'; Expected = -1 },
+    @{ Left = '1.0.0-alpha'; Right = '1.0.0-alpha.1'; Expected = -1 },
+    @{ Left = '1.0.0-alpha.9.2'; Right = '1.0.0-alpha.10'; Expected = -1 },
+    @{ Left = '1.0.0-1'; Right = '1.0.0-alpha'; Expected = -1 }
+)) {
+    if (([Math]::Sign((Compare-PackageVersions $case.Left $case.Right))) -ne $case.Expected) {
+        throw "Incorrect version precedence: $($case.Left) / $($case.Right)"
+    }
+}
+if ((ConvertTo-VersionOrNull 'codex-cli 0.163.0-alpha.5') -ne '0.163.0-alpha.5') { throw 'Prerelease suffix was lost' }
+if ((Get-NpmReleaseChannel '0.163.0-alpha.5') -ne 'alpha') { throw 'Wrong alpha channel' }
+if ((Get-NpmReleaseChannel '0.162.1') -ne 'latest') { throw 'Wrong stable channel' }
+
+$script:installedCli = '0.163.0-alpha.5'
+$script:alphaVersion = '0.163.0-alpha.11'
+$script:stopCount = 0
+$script:installerCount = 0
+$script:codexCommandPath = Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin\codex.exe'
+function Stop-CodexProcess { $script:stopCount++ }
+function Get-Command {
+    param($Name, $ErrorAction)
+    return [pscustomobject]@{ Source = $script:codexCommandPath }
+}
+function Invoke-CommandCapture {
+    param($FilePath, $Arguments, [switch]$NoLogCommand)
+    $script:commands.Add("$FilePath $($Arguments -join ' ')")
+    $text = switch ($Arguments[0]) {
+        '--version' { "codex-cli $script:installedCli" }
+        'prefix' { 'C:\mock-npm' }
+        'list' { '{"dependencies":{"@openai/codex":{"version":"' + $script:installedCli + '"}}}' }
+        'view' { if ($Arguments[2] -eq 'dist-tags.alpha') { $script:alphaVersion } else { '0.162.1' } }
+        default { throw 'Unexpected command' }
+    }
+    return [pscustomobject]@{ ExitCode = 0; Text = $text }
+}
+function Invoke-LoggedCommand {
+    param($FilePath, $Arguments)
+    $script:commands.Add("$FilePath $($Arguments -join ' ')")
+    $script:installedCli = '0.163.0-alpha.11'
+}
+function Invoke-WebRequest {
+    param($Uri, $OutFile, [switch]$UseBasicParsing)
+    if ($Uri -ne 'https://chatgpt.com/codex/install.ps1') { throw 'Unexpected installer URL' }
+    $script:installerCount++
+    Set-Content -LiteralPath $OutFile -Value '# Mock installer, never executed'
+}
+$script:messages.Clear()
+$script:commands.Clear()
+Invoke-CheckStage 'Active Codex CLI'
+if (-not ($script:messages -contains '=== CHECK AVAILABLE: Active Codex CLI ===')) { throw 'Alpha update not detected' }
+if (-not ($script:commands -contains 'npm view @openai/codex dist-tags.alpha --silent')) { throw 'Alpha channel was not queried' }
+if ($script:stopCount -or $script:installerCount) { throw 'Prerelease check changed software' }
+
+$previousNonInteractive = $env:CODEX_NON_INTERACTIVE
+Update-ActiveCodexCli
+if ($script:installerCount -ne 1 -or $script:stopCount -ne 1) { throw 'Standalone prerelease installer was not used' }
+if (-not ($script:commands -match '-Release 0.163.0-alpha.11$')) { throw 'Standalone update did not pin the alpha version' }
+if ($env:CODEX_NON_INTERACTIVE -ne $previousNonInteractive) { throw 'Installer environment was not restored' }
+if ($script:commands -contains 'codex update') { throw 'Prerelease invoked stable updater' }
+
+$script:commands.Clear()
+$script:codexCommandPath = 'C:\mock-npm\codex.cmd'
+Update-CodexPrerelease '0.163.0-alpha.11'
+if (-not ($script:commands -contains 'npm install -g @openai/codex@0.163.0-alpha.11')) { throw 'Active npm CLI update did not pin its release' }
+$script:codexCommandPath = 'C:\unknown-installer\codex.exe'
+$previousStops = $script:stopCount
+$failed = $false
+try { Update-CodexPrerelease '0.163.0-alpha.11' } catch { $failed = $true }
+if (-not $failed -or $script:stopCount -ne $previousStops) { throw 'Unknown installation was not protected before shutdown' }
+$script:codexCommandPath = Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin\codex.exe'
+
+$script:installedCli = '0.163.0-alpha.5'
+$script:commands.Clear()
+Update-NpmGlobalPackage '@openai/codex' 'Codex CLI'
+if (-not ($script:commands -contains 'npm install -g @openai/codex@0.163.0-alpha.11')) { throw 'npm prerelease update did not preserve channel' }
+
+$script:installedCli = '0.163.0-alpha.5'
+$script:alphaVersion = ''
+$script:messages.Clear()
+$script:commands.Clear()
+Invoke-CheckStage 'Active Codex CLI'
+if (-not ($script:messages -contains '=== CHECK UNKNOWN: Active Codex CLI ===')) { throw 'Missing alpha tag was reported current' }
+$failed = $false
+try { Update-ActiveCodexCli } catch { $failed = $true }
+if (-not $failed -or ($script:commands -contains 'codex update')) { throw 'Missing alpha tag allowed a stable update' }
+$script:alphaVersion = '0.162.1'
+if ($null -ne (Get-NpmLatestVersion '@openai/codex' '0.163.0-alpha.5')) { throw 'Wrong-channel tag was accepted' }
+
+$script:installedCli = '0.163.0-alpha.11'
+$script:alphaVersion = '0.163.0-alpha.11'
+$script:commands.Clear()
+Update-ActiveCodexCli
+if ($script:installerCount -ne 1) { throw 'Current alpha version was reinstalled' }
+$script:installedCli = '0.162.1'
+$script:commands.Clear()
+Invoke-CheckStage 'Active Codex CLI'
+if (-not ($script:commands -contains 'npm view @openai/codex version --silent')) { throw 'Stable lookup changed channel' }
+Write-Output 'PASS: prerelease parsing and precedence, alpha/stable lookups, read-only alpha checks, pinned native/npm updates, missing/wrong channels, current alpha skip'

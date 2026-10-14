@@ -361,15 +361,55 @@ function ConvertTo-VersionOrNull {
         return $null
     }
 
-    if ($Text -match '([0-9]+(?:\.[0-9]+){1,3})') {
-        try {
-            return [version]$Matches[1]
-        } catch {
-            return $null
-        }
+    if ($Text -match '(?<![0-9.])([0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)(?![0-9.])') {
+        return $Matches[1]
     }
 
     return $null
+}
+
+function Get-NpmReleaseChannel {
+    param([string]$Version)
+    if ($Version -match '^\d+(?:\.\d+){1,3}-([A-Za-z][A-Za-z0-9-]*)(?:\.|\+|$)') { return $Matches[1] }
+    if ($Version -match '^\d+(?:\.\d+){1,3}-') { throw "Cannot infer npm release channel from $Version" }
+    return 'latest'
+}
+
+function Compare-PackageVersions {
+    param([string]$Installed, [string]$Available)
+    $pattern = '^(?<core>\d+(?:\.\d+){1,3})(?:-(?<pre>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+    $left = [regex]::Match($Installed, $pattern)
+    $right = [regex]::Match($Available, $pattern)
+    if (-not $left.Success -or -not $right.Success) { throw 'Invalid package version' }
+    $leftCore = @($left.Groups['core'].Value.Split('.'))
+    $rightCore = @($right.Groups['core'].Value.Split('.'))
+    for ($i = 0; $i -lt 4; $i++) {
+        $a = if ($i -lt $leftCore.Count) { [decimal]$leftCore[$i] } else { 0 }
+        $b = if ($i -lt $rightCore.Count) { [decimal]$rightCore[$i] } else { 0 }
+        if ($a -ne $b) { return $a.CompareTo($b) }
+    }
+    $leftPre = $left.Groups['pre'].Value
+    $rightPre = $right.Groups['pre'].Value
+    if (-not $leftPre -and -not $rightPre) { return 0 }
+    if (-not $leftPre) { return 1 }
+    if (-not $rightPre) { return -1 }
+    $aParts = $leftPre.Split('.')
+    $bParts = $rightPre.Split('.')
+    for ($i = 0; $i -lt [Math]::Min($aParts.Count, $bParts.Count); $i++) {
+        $a = $aParts[$i]
+        $b = $bParts[$i]
+        $aNumeric = $a -match '^\d+$'
+        $bNumeric = $b -match '^\d+$'
+        if ($aNumeric -and $bNumeric) {
+            $a = $a.TrimStart('0'); $b = $b.TrimStart('0')
+            $comparison = $a.Length.CompareTo($b.Length)
+            if ($comparison -eq 0) { $comparison = [string]::CompareOrdinal($a, $b) }
+        } elseif ($aNumeric -ne $bNumeric) {
+            $comparison = if ($aNumeric) { -1 } else { 1 }
+        } else { $comparison = [string]::CompareOrdinal($a, $b) }
+        if ($comparison -ne 0) { return [Math]::Sign($comparison) }
+    }
+    return $aParts.Count.CompareTo($bParts.Count)
 }
 
 function Get-ToolVersion {
@@ -391,14 +431,17 @@ function Get-ToolVersion {
 }
 
 function Get-NpmLatestVersion {
-    param([string]$PackageName)
+    param([string]$PackageName, [string]$InstalledVersion)
 
     if (-not (Test-Tool 'npm')) {
         Write-Log 'npm not found'
         return $null
     }
 
-    $result = Invoke-CommandCapture -FilePath 'npm' -Arguments @('view', $PackageName, 'version', '--silent') -NoLogCommand
+    $channel = Get-NpmReleaseChannel $InstalledVersion
+    Write-Log "Checking npm release channel for ${PackageName}: $channel"
+    $field = if ($channel -eq 'latest') { 'version' } else { "dist-tags.$channel" }
+    $result = Invoke-CommandCapture -FilePath 'npm' -Arguments @('view', $PackageName, $field, '--silent') -NoLogCommand
     if ($result.ExitCode -ne 0) {
         Write-Log "npm latest lookup failed for ${PackageName}: exit code $($result.ExitCode)"
         return $null
@@ -407,8 +450,11 @@ function Get-NpmLatestVersion {
     $latest = ConvertTo-VersionOrNull $result.Text
     if ($null -eq $latest) {
         Write-Log "npm latest lookup returned an unparsable version for ${PackageName}: $($result.Text)"
+    } elseif ((Get-NpmReleaseChannel $latest) -ne $channel) {
+        Write-Log "npm channel $channel returned a different release channel; comparison unavailable"
+        return $null
     } else {
-        Write-Log "Latest npm version for ${PackageName}: $latest"
+        Write-Log "Latest npm version for ${PackageName} (${channel}): $latest"
     }
 
     return $latest
@@ -1063,6 +1109,34 @@ function Update-ClaudeDesktop {
     }
 }
 
+function Update-CodexPrerelease {
+    param([string]$Version)
+    $command = Get-Command codex -ErrorAction Stop
+    if (Test-Tool 'npm') {
+        $prefix = Invoke-CommandCapture 'npm' @('prefix', '-g') -NoLogCommand
+        if ($prefix.ExitCode -eq 0 -and [IO.Path]::GetDirectoryName($command.Source) -eq $prefix.Text.Trim()) {
+            Stop-CodexProcess
+            Invoke-LoggedCommand 'npm' @('install', '-g', "@openai/codex@$Version")
+            return
+        }
+    }
+    $standalonePath = Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin\codex.exe'
+    if ([IO.Path]::GetFullPath($command.Source) -ne [IO.Path]::GetFullPath($standalonePath)) {
+        throw 'Cannot safely update this prerelease CLI installation; use its original installer with the required release version'
+    }
+    $installer = Join-Path ([IO.Path]::GetTempPath()) ("AIUpdater-codex-{0}.ps1" -f [guid]::NewGuid().ToString('N'))
+    $previousNonInteractive = $env:CODEX_NON_INTERACTIVE
+    try {
+        Invoke-WebRequest 'https://chatgpt.com/codex/install.ps1' -OutFile $installer -UseBasicParsing
+        $env:CODEX_NON_INTERACTIVE = '1'
+        Stop-CodexProcess
+        Invoke-LoggedCommand 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer, '-Release', $Version)
+    } finally {
+        $env:CODEX_NON_INTERACTIVE = $previousNonInteractive
+        if (Test-Path -LiteralPath $installer) { Remove-Item -LiteralPath $installer -Force }
+    }
+}
+
 function Update-ActiveCodexCli {
     if (-not (Test-Tool 'codex')) {
         Write-Log 'Codex CLI not found'
@@ -1070,10 +1144,14 @@ function Update-ActiveCodexCli {
     }
 
     $currentVersion = Get-ToolVersion 'codex'
-    $latestVersion = Get-NpmLatestVersion '@openai/codex'
+    $latestVersion = Get-NpmLatestVersion '@openai/codex' $currentVersion
+    $channel = Get-NpmReleaseChannel $currentVersion
+    if ($channel -ne 'latest' -and $null -eq $latestVersion) {
+        throw "Cannot determine the latest Codex CLI version in channel $channel; update skipped"
+    }
 
-    if ($null -ne $currentVersion -and $null -ne $latestVersion -and $currentVersion -ge $latestVersion) {
-        Write-Log 'Active Codex CLI is already up to date'
+    if ($null -ne $currentVersion -and $null -ne $latestVersion -and (Compare-PackageVersions $currentVersion $latestVersion) -ge 0) {
+        Write-Log "Active Codex CLI is already up to date in channel $channel ($currentVersion)"
         return
     }
 
@@ -1083,9 +1161,18 @@ function Update-ActiveCodexCli {
         Write-Log 'Active Codex CLI version comparison was inconclusive; running codex updater'
     }
 
-    Stop-CodexProcess
-    Invoke-LoggedCommand -FilePath 'codex' -Arguments @('update')
+    if ($channel -ne 'latest') {
+        Update-CodexPrerelease $latestVersion
+    } else {
+        Stop-CodexProcess
+        Invoke-LoggedCommand -FilePath 'codex' -Arguments @('update')
+    }
     $updatedVersion = Get-ToolVersion 'codex'
+    if ($channel -ne 'latest' -and ($null -eq $updatedVersion -or
+            (Get-NpmReleaseChannel $updatedVersion) -ne $channel -or
+            (Compare-PackageVersions $updatedVersion $latestVersion) -lt 0)) {
+        throw "Codex CLI did not reach the requested $channel version $latestVersion (installed: $updatedVersion)"
+    }
     if ($null -ne $updatedVersion) {
         Write-Log "Active Codex CLI version after update: $updatedVersion"
     }
@@ -1104,19 +1191,19 @@ function Update-NpmGlobalPackage {
     }
 
     Write-Log "$DisplayName global npm version: $currentVersion"
-    $latestVersion = Get-NpmLatestVersion $PackageName
+    $latestVersion = Get-NpmLatestVersion $PackageName $currentVersion
     if ($null -eq $latestVersion) {
         Write-Log "$DisplayName npm latest version unavailable; npm update skipped"
         return
     }
 
-    if ($currentVersion -ge $latestVersion) {
+    if ((Compare-PackageVersions $currentVersion $latestVersion) -ge 0) {
         Write-Log "$DisplayName global npm package is already up to date"
         return
     }
 
     Write-Log "$DisplayName global npm update needed: $currentVersion -> $latestVersion"
-    Invoke-LoggedCommand -FilePath 'npm' -Arguments @('install', '-g', "$PackageName@latest")
+    Invoke-LoggedCommand -FilePath 'npm' -Arguments @('install', '-g', "$PackageName@$latestVersion")
     $updatedVersion = Get-NpmGlobalPackageVersion $PackageName
     if ($null -ne $updatedVersion) {
         Write-Log "$DisplayName global npm version after update: $updatedVersion"
@@ -1130,11 +1217,15 @@ function Update-ClaudeCode {
     }
 
     $currentVersion = Get-ToolVersion 'claude'
-    $latestVersion = Get-NpmLatestVersion '@anthropic-ai/claude-code'
+    $latestVersion = Get-NpmLatestVersion '@anthropic-ai/claude-code' $currentVersion
 
-    if ($null -ne $currentVersion -and $null -ne $latestVersion -and $currentVersion -ge $latestVersion) {
+    if ($null -ne $currentVersion -and $null -ne $latestVersion -and (Compare-PackageVersions $currentVersion $latestVersion) -ge 0) {
         Write-Log 'Claude Code is already up to date'
         return
+    }
+
+    if ((Get-NpmReleaseChannel $currentVersion) -ne 'latest') {
+        throw 'Native Claude prerelease updates cannot guarantee the selected channel; update the matching npm component or use its original installer'
     }
 
     if ($null -ne $currentVersion -and $null -ne $latestVersion) {
