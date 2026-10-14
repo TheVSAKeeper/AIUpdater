@@ -17,6 +17,7 @@
     <Resource Include="Assets\AIUpdater.png" />
     <None Update="Update-Codex.ps1" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Check-Updates.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Manage-Components.ps1" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 

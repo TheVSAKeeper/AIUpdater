@@ -15,7 +15,7 @@ $backupDirectory = Join-Path $projectRoot 'artifacts\desktop-previous'
 if ($LASTEXITCODE -ne 0) { throw "Ошибка публикации: $LASTEXITCODE" }
 $executable = Join-Path $publishDirectory 'AIUpdater.exe'
 if (-not (Test-Path -LiteralPath $executable)) { throw "Приложение не найдено: $executable" }
-foreach ($scriptName in @('Update-Codex.ps1', 'Check-Updates.ps1')) {
+foreach ($scriptName in @('Update-Codex.ps1', 'Check-Updates.ps1', 'Manage-Components.ps1')) {
     if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory $scriptName))) {
         throw "В публикации отсутствует скрипт: $scriptName"
     }

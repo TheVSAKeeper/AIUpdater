@@ -19,6 +19,14 @@ public partial class MainWindow
     private bool _isRunning;
     private bool _stopRequested;
     private bool _checkOnly;
+    private string _action = "Update";
+    private string OperationName => _action switch
+    {
+        "Install" => "Установка",
+        "Uninstall" => "Удаление",
+        _ => _checkOnly ? "Проверка" : "Обновление"
+    };
+    private ChangelogWindow? _changelogWindow;
     private sealed class VendorRun(string vendor)
     {
         public string Vendor { get; } = vendor;
@@ -104,6 +112,30 @@ public partial class MainWindow
         LogTabs.Items.Add(new TabItem { Header = header, Content = content, DataContext = vendor });
     }
 
+    private void ChangelogButton_Click(object sender, RoutedEventArgs e)
+    {
+        var vendor = (LogTabs.SelectedItem as TabItem)?.DataContext as VendorStatus;
+        OpenChangelog(vendor?.Stages.FirstOrDefault());
+    }
+
+    private void ChangelogMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: UpdateStage stage }) OpenChangelog(stage);
+    }
+
+    private void OpenChangelog(UpdateStage? stage)
+    {
+        if (_changelogWindow is not null)
+        {
+            if (stage is not null) _changelogWindow.SelectStage(stage);
+            _changelogWindow.Activate();
+            return;
+        }
+        _changelogWindow = new ChangelogWindow(Stages, stage) { Owner = this };
+        _changelogWindow.Closed += (_, _) => _changelogWindow = null;
+        _changelogWindow.Show();
+    }
+
     private void CheckMode_Changed(object sender, RoutedEventArgs e)
     {
         if (RunButton is null || ModeDescriptionText is null) return;
@@ -136,7 +168,17 @@ public partial class MainWindow
         }
     }
 
-    private async Task RunUpdaterAsync(UpdateStage? requestedStage)
+    private async void ComponentAction_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isRunning || sender is not MenuItem { DataContext: UpdateStage stage, Tag: string action }
+            || !stage.CanManageInstallation) return;
+        if (action == "Uninstall" && MessageBox.Show(this, $"Удалить {stage.Name}?",
+                "Удаление компонента", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+            return;
+        await RunUpdaterAsync(stage, action);
+    }
+
+    private async Task RunUpdaterAsync(UpdateStage? requestedStage, string action = "Update")
     {
         if (_isRunning) return;
         if (!File.Exists(_scriptPath))
@@ -144,7 +186,8 @@ public partial class MainWindow
             MessageBox.Show(this, $"Скрипт не найден:\n{_scriptPath}", "AI Updater", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
-        _checkOnly = CheckOnlyCheckBox.IsChecked == true;
+        _action = action;
+        _checkOnly = action == "Update" && CheckOnlyCheckBox.IsChecked == true;
         PrepareRun(requestedStage);
         try
         {
@@ -167,7 +210,7 @@ public partial class MainWindow
     {
         var run = new VendorRun(vendor);
         var vendorStatus = Vendors.First(item => item.Name == vendor);
-        vendorStatus.SetStatus(_checkOnly ? "Проверка" : "Обновление", "Запуск проверки обновлений", (Brush)FindResource("AccentTextBrush"));
+        vendorStatus.SetStatus(OperationName, $"{OperationName}: запуск", (Brush)FindResource("AccentTextBrush"));
         var temporaryLog = Path.Combine(Path.GetTempPath(), $"AIUpdater-{Guid.NewGuid():N}.log");
         using var process = new Process();
         process.StartInfo = new ProcessStartInfo
@@ -184,6 +227,8 @@ public partial class MainWindow
                      "-Vendor", vendor, "-LogPath", temporaryLog })
             process.StartInfo.ArgumentList.Add(argument);
         if (_checkOnly) process.StartInfo.ArgumentList.Add("-CheckOnly");
+        process.StartInfo.ArgumentList.Add("-Action");
+        process.StartInfo.ArgumentList.Add(_action);
         if (requestedStage is not null)
         {
             process.StartInfo.ArgumentList.Add("-OnlyStage");
@@ -221,8 +266,10 @@ public partial class MainWindow
                 else stage.SetFailed();
             }
             var successful = exitCode == 0 && !run.SawError && !_stopRequested;
+            if (successful && requestedStage is not null && _action != "Update")
+                requestedStage.SetInstallationResult(_action == "Install");
             vendorStatus.SetStatus(_stopRequested ? "Остановлено" : successful ? "Готово" : "Ошибка",
-                _stopRequested ? "Остановка запрошена пользователем" : successful ? "Все проверки завершены" : $"Завершено с ошибками (код {exitCode})",
+                _stopRequested ? "Остановка запрошена пользователем" : successful ? $"{OperationName}: завершено" : $"Завершено с ошибками (код {exitCode})",
                 _stopRequested ? Brushes.LightSlateGray : successful ? (Brush)FindResource("AccentTextBrush") : Brushes.LightCoral);
             if (_checkOnly && successful)
             {
@@ -284,6 +331,7 @@ public partial class MainWindow
         OverallStatusText.Text = _checkOnly
             ? requestedStage is null ? "Проверка версий без установки обновлений" : $"Только проверка: {requestedStage.Name}"
             : requestedStage is null ? "Проверка и установка всех обновлений" : $"Обновление: {requestedStage.Name}";
+        if (_action != "Update") OverallStatusText.Text = $"{OperationName}: {requestedStage?.Name}";
         RunProgressBar.Visibility = Visibility.Visible;
         RunButton.IsEnabled = false;
         CheckOnlyCheckBox.IsEnabled = false;
@@ -447,6 +495,8 @@ public partial class MainWindow
             : _stopRequested ? "Обновление остановлено" : $"Завершено с ошибками (код {exitCode})";
         if (_checkOnly && success)
             OverallStatusText.Text = CheckSummary(Stages.Where(stage => _requestedStage is null || stage == _requestedStage));
+        else if (success)
+            OverallStatusText.Text = $"{OperationName}: завершено" + (_requestedStage is null ? "" : $" — {_requestedStage.Name}");
         RunProgressBar.Visibility = Visibility.Hidden;
         RunButton.IsEnabled = true;
         CheckOnlyCheckBox.IsEnabled = true;

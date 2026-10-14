@@ -86,13 +86,15 @@ function Invoke-CommandCapture {
 
 # Exercise the actual dispatcher, including the branch that normally starts applications.
 $CheckOnly = $true
+$Action = 'Update'
 $OnlyStage = $null
 $Vendor = $null
 $dispatch = $ast.EndBlock.Statements | Where-Object {
     $_ -is [System.Management.Automation.Language.TryStatementAst]
 } | Select-Object -Last 1
 $checkScriptPath = Join-Path $PSScriptRoot 'Check-Updates.ps1'
-$dispatchText = $dispatch.Extent.Text.Replace(". (Join-Path `$PSScriptRoot 'Check-Updates.ps1')", '. $checkScriptPath').Replace('exit 1', 'throw ($script:messages -join "`n")')
+$manageScriptPath = Join-Path $PSScriptRoot 'Manage-Components.ps1'
+$dispatchText = $dispatch.Extent.Text.Replace(". (Join-Path `$PSScriptRoot 'Check-Updates.ps1')", '. $checkScriptPath').Replace(". (Join-Path `$PSScriptRoot 'Manage-Components.ps1')", '. $manageScriptPath').Replace('exit 1', 'throw ($script:messages -join "`n")')
 Invoke-Expression $dispatchText
 $checkResults = @($script:messages | Where-Object { $_ -match '^=== CHECK ' })
 if ($checkResults.Count -ne 10) { throw "Expected ten check results; received $($checkResults.Count)" }
@@ -144,3 +146,54 @@ $script:firstExitCode = 123
 $result = Invoke-CommandCapture 'winget' @('list') -NoLogCommand
 if ($script:captureCount -ne 1 -or $result.ExitCode -ne 123) { throw 'Unrelated winget failure was hidden' }
 Write-Output 'PASS: winget output with/without source column, initialization retry, failure preservation'
+
+# Lifecycle tests capture commands without installing or removing real software.
+function Invoke-LoggedCommand { param($FilePath, $Arguments) $script:commands.Add("$FilePath $($Arguments -join ' ')") }
+function Invoke-CommandCapture {
+    param($FilePath, $Arguments)
+    $script:commands.Add("$FilePath $($Arguments -join ' ')")
+    return [pscustomobject]@{ ExitCode = $script:lifecycleExitCode; Text = '' }
+}
+$script:lifecycleExitCode = 0
+$script:commands.Clear()
+Invoke-ComponentAction 'Claude Desktop' 'Install'
+Invoke-ComponentAction 'Antigravity Desktop' 'Uninstall'
+Invoke-ComponentAction 'Codex npm package' 'Install'
+Invoke-ComponentAction 'Claude npm package' 'Uninstall'
+if ($script:commands.Count -ne 4) { throw 'Unexpected lifecycle commands' }
+if (-not ($script:commands -match 'winget install --id Anthropic.Claude --exact')) { throw 'Missing desktop installation' }
+if (-not ($script:commands -match 'winget uninstall --id Google.Antigravity --exact')) { throw 'Missing desktop removal' }
+if (-not ($script:commands -contains 'npm install -g @openai/codex@latest')) { throw 'Missing npm installation' }
+if (-not ($script:commands -contains 'npm uninstall -g @anthropic-ai/claude-code')) { throw 'Missing npm removal' }
+$script:lifecycleExitCode = 123
+$failed = $false
+try { Invoke-ComponentAction 'Claude Desktop' 'Uninstall' } catch { $failed = $true }
+if (-not $failed) { throw 'Uninstall error incorrectly accepted' }
+$script:lifecycleExitCode = -1978335212
+Invoke-ComponentAction 'Claude Desktop' 'Uninstall'
+$failed = $false
+try { Invoke-ComponentAction 'Codex plugins' 'Uninstall' } catch { $failed = $true }
+if (-not $failed) { throw 'Plugin group removal incorrectly accepted' }
+$script:commands.Clear()
+$failed = $false
+try { Invoke-ComponentAction 'Antigravity CLI' 'Uninstall' } catch { $failed = $true }
+if (-not $failed -or $script:commands.Count) { throw 'CLI from an unknown installation was not protected' }
+
+# Verify the dispatcher selects a single component and never restarts a removed app.
+$script:lifecycleExitCode = 0
+$script:commands.Clear()
+$CheckOnly = $false
+$OnlyStage = 'Claude npm package'
+$Vendor = 'Anthropic'
+$Action = 'Uninstall'
+Invoke-Expression $dispatchText
+if ($script:commands.Count -ne 1 -or $script:commands[0] -ne 'npm uninstall -g @anthropic-ai/claude-code') { throw 'Removal affected another component' }
+
+function Get-ClaudeDesktopWingetState { return [pscustomobject]@{ IsInstalled = $false } }
+function Get-CodexDesktopWingetState { return [pscustomobject]@{ IsInstalled = $false } }
+function Ensure-UpdateServicesRunning { }
+$script:commands.Clear()
+Update-ClaudeDesktop
+Update-CodexDesktop
+if ($script:commands.Count) { throw 'Update installed an absent application' }
+Write-Output 'PASS: separate install/remove commands, uninstall errors, absent packages, plugin guard, selected-component dispatch, updates do not install absent apps'

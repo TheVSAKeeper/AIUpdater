@@ -24,7 +24,10 @@
         <TextBlock Text="AI Updater" FontSize="28" FontWeight="SemiBold" />
         <TextBlock x:Name="OverallStatusText" Text="Готов к проверке обновлений" Margin="0,6,0,0" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
       </StackPanel>
-      <Button Grid.Column="2" x:Name="OpenLogButton" Content="Открыть лог" Click="OpenLogButton_Click" VerticalAlignment="Center" />
+      <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+        <Button Content="Что нового" Click="ChangelogButton_Click" Margin="0,0,10,0" />
+        <Button x:Name="OpenLogButton" Content="Открыть лог" Click="OpenLogButton_Click" />
+      </StackPanel>
     </Grid>
     <Border Grid.Row="1" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
             BorderThickness="1" CornerRadius="12" Padding="18,14" Margin="0,16,0,14">
@@ -74,7 +77,15 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Button Tag="Stage" Click="StageButton_Click" HorizontalContentAlignment="Stretch" Padding="9,5" Margin="6,0,0,0"
-                            ToolTip="Запустить этот компонент в выбранном режиме" Background="#182A21">
+                            ToolTip="Нажмите для запуска; правой кнопкой — установка, удаление и что нового" Background="#182A21">
+                      <Button.ContextMenu>
+                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                          <MenuItem Header="Установить" Tag="Install" Click="ComponentAction_Click" IsEnabled="{Binding CanManageInstallation}" />
+                          <MenuItem Header="Удалить" Tag="Uninstall" Click="ComponentAction_Click" IsEnabled="{Binding CanManageInstallation}" />
+                          <Separator />
+                          <MenuItem Header="Что нового" Click="ChangelogMenuItem_Click" />
+                        </ContextMenu>
+                      </Button.ContextMenu>
                       <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="12" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                         <Ellipse Width="6" Height="6" Fill="{Binding IndicatorBrush}" VerticalAlignment="Center" />

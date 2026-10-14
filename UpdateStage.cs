@@ -14,6 +14,14 @@ public sealed class UpdateStage : INotifyPropertyChanged
     public required string Name { get; init; }
     public required string Vendor { get; init; }
     public string? CheckResult { get; private set; }
+    public bool CanManageInstallation => !Id.EndsWith("plugins", StringComparison.Ordinal);
+
+    public void SetInstallationResult(bool installed)
+    {
+        SetCompleted();
+        CheckResult = installed ? null : "NOT_INSTALLED";
+        Status = installed ? "Установлено" : "Удалено";
+    }
 
     public string Status
     {

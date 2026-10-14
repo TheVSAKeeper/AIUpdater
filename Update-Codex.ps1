@@ -15,10 +15,15 @@
     [ValidateSet('OpenAI', 'Anthropic', 'Google')]
     [string]$Vendor,
     [switch]$CheckOnly,
+    [ValidateSet('Update', 'Install', 'Uninstall')]
+    [string]$Action = 'Update',
     [string]$LogPath = (Join-Path $PSScriptRoot 'Update-Codex-last.log')
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Action -ne 'Update' -and (-not $OnlyStage -or $CheckOnly)) {
+    throw 'Install and Uninstall require OnlyStage and cannot be combined with CheckOnly'
+}
 
 $productId = '9PLM9XGG6VKS'
 $packageName = 'OpenAI.Codex'
@@ -45,6 +50,7 @@ if (-not $CheckOnly -and -not (Test-Admin)) {
         $arguments += @('-OnlyStage', "`"$OnlyStage`"")
     }
     if ($Vendor) { $arguments += @('-Vendor', "`"$Vendor`"") }
+    $arguments += @('-Action', $Action)
     $arguments += @('-LogPath', "`"$LogPath`"")
     Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden
     exit
@@ -908,15 +914,7 @@ function Update-CodexDesktop {
     }
 
     if (-not $state.IsInstalled) {
-        Write-Log 'ChatGPT/Codex desktop is not installed; installing from Microsoft Store'
-        Invoke-CodexStoreAction -Action 'install' -Attempt 1
-
-        $installedVersion = Get-CodexVersion
-        if ($null -eq $installedVersion) {
-            throw 'ChatGPT/Codex desktop package was not found after installation'
-        }
-
-        Write-Log "Installed ChatGPT/Codex desktop version: $installedVersion"
+        Write-Log 'ChatGPT/Codex desktop is not installed; use the separate Install action'
         return
     }
 
@@ -1037,24 +1035,7 @@ function Update-ClaudeDesktop {
     }
 
     if (-not $state.IsInstalled) {
-        Write-Log 'Claude Desktop is not installed; installing latest version'
-        Invoke-LoggedCommand -FilePath 'winget' -Arguments @(
-            'install',
-            '--id', $claudeDesktopPackageId,
-            '--exact',
-            '--source', 'winget',
-            '--accept-source-agreements',
-            '--accept-package-agreements',
-            '--disable-interactivity'
-        )
-
-        $script:claudeDesktopWasStopped = $true
-        $updatedState = Get-ClaudeDesktopWingetState
-        if ($null -eq $updatedState -or -not $updatedState.IsInstalled) {
-            throw 'Claude Desktop was not found by winget after installation'
-        }
-
-        Write-Log "Installed Claude Desktop version: $($updatedState.Installed)"
+        Write-Log 'Claude Desktop is not installed; use the separate Install action'
         return
     }
 
@@ -1320,6 +1301,7 @@ function Invoke-UpdateStep {
 
 try {
     . (Join-Path $PSScriptRoot 'Check-Updates.ps1')
+    . (Join-Path $PSScriptRoot 'Manage-Components.ps1')
     if ($CheckOnly) { Write-Log 'Check-only mode: no installations, marketplace refreshes or application restarts' }
     $script:codexWasStopped = $false
     $script:claudeDesktopWasStopped = $false
@@ -1345,6 +1327,9 @@ try {
             if ($CheckOnly) {
                 $stageName = $step.Key
                 Invoke-UpdateStep -Name $stageName -ScriptBlock { Invoke-CheckStage $stageName }
+            } elseif ($Action -ne 'Update') {
+                $stageName = $step.Key
+                Invoke-UpdateStep -Name $stageName -ScriptBlock { Invoke-ComponentAction -Stage $stageName -Action $Action }
             } else {
                 Invoke-UpdateStep -Name $step.Key -ScriptBlock $step.Value
             }
@@ -1357,7 +1342,7 @@ try {
         exit 1
     }
 
-    if (-not $CheckOnly) {
+    if (-not $CheckOnly -and $Action -ne 'Uninstall') {
         Start-CodexProcess
         Start-ClaudeDesktopProcess
     }
