@@ -20,7 +20,8 @@
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <Image Source="Assets/AIUpdater.png" Width="56" Height="56" Margin="-7,0,14,0" />
+      <Image Source="Assets/AIUpdater.png" Width="72" Height="72" Margin="-8,-8,14,-8"
+             RenderOptions.BitmapScalingMode="HighQuality" UseLayoutRounding="True" SnapsToDevicePixels="True" />
       <StackPanel Grid.Column="1" VerticalAlignment="Center">
         <TextBlock Text="AI Updater" FontSize="28" FontWeight="SemiBold" />
         <TextBlock x:Name="OverallStatusText" Text="Готов к проверке обновлений" Margin="0,6,0,0" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
