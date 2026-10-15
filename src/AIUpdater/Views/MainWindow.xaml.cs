@@ -3,6 +3,7 @@ using AIUpdater.Models;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -32,6 +33,7 @@ public partial class MainWindow
     {
         SourceInitialized += (_, _) => WindowTheme.Apply(this);
         InitializeComponent();
+        Title = $"AI Updater v{typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion}";
         DataContext = this;
 
         var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AIUpdater", "Logs");

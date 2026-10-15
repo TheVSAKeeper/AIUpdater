@@ -1,0 +1,118 @@
+﻿name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+
+env:
+  RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  prepare:
+    if: >
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      needed: ${{ steps.release.outputs.needed }}
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+      - name: Check version, notes and existing release
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = & ./build/release-info.ps1
+          $tags = @(gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate --jq '.[].tag_name')
+          if ($LASTEXITCODE -ne 0) { throw 'Не удалось прочитать список релизов GitHub' }
+          $needed = (-not ($tags -contains $release.Tag)).ToString().ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "version=$($release.Version)"
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "needed=$needed"
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.needed == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          global-json-file: global.json
+      - name: Verify manual release
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: ./build/verify.ps1
+      - name: Package release
+        shell: pwsh
+        run: ./build/package-release.ps1 -Output artifacts/release-build
+      - name: Upload release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-files
+          path: |
+            artifacts/release-build/dist/*
+            artifacts/release-build/release-notes.md
+          if-no-files-found: error
+          retention-days: 5
+
+  publish:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+      - name: Download release files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-files
+          path: release-files
+      - name: Verify checksums
+        working-directory: release-files/dist
+        run: sha256sum --check SHA256SUMS.txt
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          TAG="v$RELEASE_VERSION"
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            TAG_SHA=$(git rev-parse "refs/tags/$TAG^{commit}")
+            if [ "$TAG_SHA" != "$RELEASE_SHA" ]; then
+              echo "Tag $TAG points to a different commit"
+              exit 1
+            fi
+          fi
+          gh release create "$TAG" \
+            release-files/dist/*.zip release-files/dist/SHA256SUMS.txt \
+            --target "$RELEASE_SHA" --title "AIUpdater $TAG" \
+            --notes-file release-files/release-notes.md --generate-notes

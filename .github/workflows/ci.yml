@@ -1,0 +1,42 @@
+﻿name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          global-json-file: global.json
+      - name: Build and check
+        shell: pwsh
+        run: ./build/verify.ps1
+      - name: Publish smoke
+        run: >
+          dotnet publish src/AIUpdater/AIUpdater.csproj
+          -c Release -r win-x64 --no-self-contained
+          -p:PublishSingleFile=true -o artifacts/publish-smoke --nologo
+      - name: Upload interface checks
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: interface-checks
+          path: artifacts/interface-check/**
+          if-no-files-found: ignore
+          retention-days: 5

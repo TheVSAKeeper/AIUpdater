@@ -2,6 +2,8 @@
 
 ### Codex обновился, Claude отстал, а плагины вообще живут своей жизнью?
 
+[![CI](https://github.com/TheVSAKeeper/AIUpdater/actions/workflows/ci.yml/badge.svg)](https://github.com/TheVSAKeeper/AIUpdater/actions/workflows/ci.yml)
+[![Release](https://github.com/TheVSAKeeper/AIUpdater/actions/workflows/release.yml/badge.svg)](https://github.com/TheVSAKeeper/AIUpdater/actions/workflows/release.yml)
 ![.NET 10](https://img.shields.io/badge/.NET-10.0-purple)
 ![WPF](https://img.shields.io/badge/UI-WPF-blueviolet)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
@@ -19,6 +21,15 @@ AIUpdater собирает инструменты OpenAI, Anthropic и Google в
 у каждого провайдера свой журнал – если один споткнулся, результат другого не потеряется.
 
 C#, WPF, .NET 10. Только Windows, тёмная тема, без путешествий по десяти терминалам.
+
+Готовые сборки – в [GitHub Releases](https://github.com/TheVSAKeeper/AIUpdater/releases/latest):
+обычный ZIP требует .NET 10 Desktop Runtime, автономный ZIP уже содержит рантайм.
+
+---
+
+## Скриншот
+
+![Главное окно AIUpdater: версии компонентов, выбор обновлений и журнал выполнения](screenshots/main-window.png)
 
 ---
 
@@ -75,7 +86,7 @@ src/AIUpdater/                 приложение WPF
     Scripts/                  проверка, обновление, установка и удаление
 tests/AIUpdater.InterfaceChecks/ проверки интерфейса
 tests/Scripts/                проверки PowerShell-логики
-build/                        сборка для локальной установки и генерация иконки
+build/                        проверки, сборка, упаковка релизов и генерация иконки
 ```
 
 В `AIUpdater.slnx` включены приложение и проект проверок интерфейса.
@@ -121,16 +132,70 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build/publish-local.ps1
 
 ## Проверки
 
+Весь набор проверок одной командой из PowerShell 7:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File build/verify.ps1
+```
+
+Или по отдельности:
+
 ```powershell
 dotnet build AIUpdater.slnx
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Scripts/Verify-Updater.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Scripts/Verify-PackageChecks.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File tests/Scripts/Verify-Release.ps1
 dotnet run --project tests/AIUpdater.InterfaceChecks -- artifacts/interface-check
 ```
 
 Скрипты проверяют сценарии обновления и чтение версий на подставных ответах команд.
 Проверка WPF-интерфейса тоже использует имитацию: установленные программы не меняет,
 снимки окна сохраняет в `artifacts/interface-check`.
+
+---
+
+## Релизы
+
+Номер хранится в `Directory.Build.props`: `1`, `2` и далее, для исправлений – `1.1`, `1.2`.
+В заголовке окна и тегах он отображается с `v`: `v1`, `v1.1`.
+Обе части номера положительные, без ведущих нулей, до 65534 – предел метаданных сборки Windows.
+SDK для сборки указан в `global.json`.
+
+Сначала опиши изменения для пользователя в [CHANGELOG.md](CHANGELOG.md), под заголовком будущей
+версии, например `## 2` или `## 1.1`. Затем повысь номер:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File build/bump-version.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File build/bump-version.ps1 -Version patch
+```
+
+Это две альтернативные команды: первая переводит `1` или `1.2` в `2`, вторая – `1` в `1.1`,
+а `1.1` в `1.2`. Можно указать точный следующий номер через `-Version 3` или `-Version 2.1`.
+Повтор и понижение номера запрещены. Без непустого раздела изменений номер не меняется.
+Скрипт сам не создаёт коммит и не отправляет изменения на GitHub.
+
+После коммита и push в `master` workflow `CI` собирает решение и запускает проверки.
+Успешный CI запускает `Release` для того же коммита. Если такого релиза ещё нет, он собирает
+архивы, создаёт тег и GitHub Release с заметками из CHANGELOG и техническим списком изменений.
+Ручной запуск `Release` на `master` повторно выполняет проверки. Уже опубликованный номер пропускается.
+
+| Файл релиза | Что внутри |
+|-------------|------------|
+| `AIUpdater-v1-win-x64.zip` | Приложение и скрипты; нужен .NET 10 Desktop Runtime |
+| `AIUpdater-v1-win-x64-portable.zip` | Приложение, скрипты и рантайм |
+| `SHA256SUMS.txt` | Контрольные суммы обоих архивов |
+
+В именах файлов `v1` заменяется текущим номером. Распаковывай архив целиком: скрипты нужны рядом с exe.
+Оба варианта хранят журналы и результаты в `%LOCALAPPDATA%\AIUpdater\Logs`.
+
+Для локальной сборки тех же архивов:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File build/package-release.ps1
+```
+
+Скрипт печатает путь к новой папке внутри `artifacts/release`. Там находятся оба ZIP, контрольные суммы
+и описание релиза. Локальная упаковка ничего не публикует.
 
 ---
 
