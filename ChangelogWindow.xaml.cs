@@ -59,7 +59,7 @@ public partial class ChangelogWindow : Window
     {
         if (_source?.PageUrl is not { } url) return;
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch (Exception exception) { MessageBox.Show(this, exception.Message, "Не удалось открыть источник", MessageBoxButton.OK, MessageBoxImage.Information); }
+        catch (Exception exception) { AppDialog.Show(this, exception.Message, "Не удалось открыть источник"); }
     }
 
     public void SelectStage(UpdateStage stage) => ComponentList.SelectedItem = stage;

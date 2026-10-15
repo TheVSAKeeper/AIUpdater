@@ -72,14 +72,17 @@ function Invoke-CommandCapture {
         return [pscustomobject]@{ ExitCode = 0; Text = '2.0.0' }
     }
     if ($FilePath -eq 'npm' -and $Arguments[0] -eq 'list') {
-        return [pscustomobject]@{ ExitCode = 0; Text = ('{"dependencies":{"' + $Arguments[2] + '":{"version":"1.0.0"}}}') }
+        return [pscustomobject]@{ ExitCode = 0; Text = '{"dependencies":{"@openai/codex":{"version":"1.0.0"},"@anthropic-ai/claude-code":{"version":"1.0.0"}}}' }
     }
     if ($FilePath -eq 'winget' -and $Arguments[0] -eq 'list') {
         $packageId = $Arguments[2]
         return [pscustomobject]@{ ExitCode = 0; Text = "Application $packageId 1.0.0 2.0.0 winget" }
     }
     if ($Arguments[0] -eq 'plugin' -and $Arguments[1] -eq 'list') {
-        return [pscustomobject]@{ ExitCode = 0; Text = '[]' }
+        $text = if ($script:pluginTestText) { $script:pluginTestText } elseif ($FilePath -eq 'codex') {
+            '{"installed":[{"pluginId":"first"},{"pluginId":"second"}]}'
+        } else { '[{"id":"first"}]' }
+        return [pscustomobject]@{ ExitCode = 0; Text = $text }
     }
     throw "Check-only mode attempted an unexpected command: $FilePath $($Arguments -join ' ')"
 }
@@ -99,8 +102,22 @@ Invoke-Expression $dispatchText
 $checkResults = @($script:messages | Where-Object { $_ -match '^=== CHECK ' })
 if ($checkResults.Count -ne 10) { throw "Expected ten check results; received $($checkResults.Count)" }
 if (@($checkResults | Where-Object { $_ -match 'CHECK AVAILABLE' }).Count -ne 7) { throw 'Available versions were not detected' }
-if (@($checkResults | Where-Object { $_ -match 'CHECK UNKNOWN' }).Count -ne 3) { throw 'Unsupported comparisons were incorrectly marked current' }
+if (@($checkResults | Where-Object { $_ -match 'CHECK DIRECT' }).Count -ne 3) { throw 'Unsupported comparisons were not marked as direct updates' }
+if (@($checkResults | Where-Object { $_ -match 'CHECK UNKNOWN' }).Count -ne 0) { throw 'Intentional comparison skips were marked as failures' }
 if ($script:HadFailure) { throw 'Check-only dispatcher failed' }
+$uiResults = @($script:messages | Where-Object { $_ -like 'UI_RESULT *' } | ForEach-Object { $_.Substring(10) | ConvertFrom-Json })
+if ($uiResults.Count -ne 10) { throw 'Missing structured results for check-only stages' }
+$cliResult = $uiResults | Where-Object Stage -EQ 'Claude Code'
+if ($cliResult.Result -ne 'AVAILABLE' -or $cliResult.Installed -ne '1.0.0' -or $cliResult.Available -ne '2.0.0') {
+    throw 'Structured result lost CLI versions'
+}
+if (($uiResults | Where-Object Stage -EQ 'Codex plugins').Info -ne 'Плагинов: 2' -or
+    ($uiResults | Where-Object Stage -EQ 'Claude plugins').Info -ne 'Плагинов: 1') { throw 'Incorrect plugin counts' }
+$script:messages.Clear()
+$script:pluginTestText = 'invalid json'
+Invoke-CheckStage 'Codex plugins'
+if (-not ($script:messages -contains '=== CHECK UNKNOWN: Codex plugins ===')) { throw 'Invalid plugin output was marked as a direct update' }
+$script:pluginTestText = $null
 
 $script:messages.Clear()
 Compare-CheckVersions 'test' ([version]'2.0') ([version]'2.0')
@@ -286,7 +303,7 @@ $script:alphaVersion = ''
 $script:messages.Clear()
 $script:commands.Clear()
 Invoke-CheckStage 'Active Codex CLI'
-if (-not ($script:messages -contains '=== CHECK UNKNOWN: Active Codex CLI ===')) { throw 'Missing alpha tag was reported current' }
+if (-not ($script:messages -contains '=== CHECK ERROR: Active Codex CLI ===')) { throw 'Missing alpha tag was not reported as a check error' }
 $failed = $false
 try { Update-ActiveCodexCli } catch { $failed = $true }
 if (-not $failed -or ($script:commands -contains 'codex update')) { throw 'Missing alpha tag allowed a stable update' }
@@ -303,3 +320,25 @@ $script:commands.Clear()
 Invoke-CheckStage 'Active Codex CLI'
 if (-not ($script:commands -contains 'npm view @openai/codex version --silent')) { throw 'Stable lookup changed channel' }
 Write-Output 'PASS: prerelease parsing and precedence, alpha/stable lookups, read-only alpha checks, pinned native/npm updates, missing/wrong channels, current alpha skip'
+
+$script:messages.Clear()
+$script:postActionUpdated = $false
+function Update-ClaudeCode { $script:postActionUpdated = $true }
+function Start-CodexProcess { }
+function Start-ClaudeDesktopProcess { }
+function Get-ToolVersion {
+    param([string]$ToolName)
+    if (-not $script:postActionUpdated) { throw 'Post-action check ran before the update' }
+    return '2.2.1'
+}
+function Get-NpmLatestVersion { return '2.2.1' }
+$CheckOnly = $false
+$OnlyStage = 'Claude Code'
+$Vendor = 'Anthropic'
+$Action = 'Update'
+Invoke-Expression $dispatchText
+$postAction = @($script:messages | Where-Object { $_ -like 'UI_RESULT *' } | ForEach-Object { $_.Substring(10) | ConvertFrom-Json })
+if ($postAction.Count -ne 1 -or $postAction[0].Stage -ne 'Claude Code' -or $postAction[0].Installed -ne '2.2.1') {
+    throw 'Dispatcher did not publish the post-update version'
+}
+Write-Output 'PASS: dispatcher publishes a structured version result after updating the selected component'

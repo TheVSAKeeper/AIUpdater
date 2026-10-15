@@ -460,32 +460,59 @@ function Get-NpmLatestVersion {
     return $latest
 }
 
-function Get-NpmGlobalPackageVersion {
+function Get-NpmGlobalPackageState {
     param([string]$PackageName)
 
+    $state = [pscustomobject]@{ Status = 'ERROR'; Version = $null; Detail = '' }
     if (-not (Test-Tool 'npm')) {
-        return $null
-    }
-
-    $result = Invoke-CommandCapture -FilePath 'npm' -Arguments @('list', '-g', $PackageName, '--depth=0', '--json', '--silent') -NoLogCommand
-    if ($result.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($result.Text)) {
-        Write-Log "Global npm package not found or unreadable: $PackageName"
-        return $null
+        $state.Detail = 'Для проверки глобального пакета требуется npm'
+        return $state
     }
 
     try {
+        $result = Invoke-CommandCapture -FilePath 'npm' -Arguments @('list', '-g', '--depth=0', '--json', '--silent') -NoLogCommand
+        if ($result.ExitCode -ne 0) {
+            Write-Log "npm global list failed: $($result.ExitCode): $($result.Text)"
+            $state.Detail = "Не удалось прочитать глобальные пакеты npm (код $($result.ExitCode))"
+            return $state
+        }
         $data = $result.Text | ConvertFrom-Json
-        $dependency = $data.dependencies.PSObject.Properties[$PackageName].Value
+        if ($data -isnot [pscustomobject] -or $data.PSObject.Properties['error'] -or
+            -not ($data.PSObject.Properties['dependencies'] -or $data.PSObject.Properties['name'] -or $data.PSObject.Properties['path'])) {
+            throw 'Unexpected npm list response'
+        }
+        $dependencies = $data.PSObject.Properties['dependencies']
+        if ($null -ne $dependencies -and $dependencies.Value -isnot [pscustomobject]) {
+            throw 'Expected a dependencies object'
+        }
+        $dependency = if ($null -ne $dependencies) { $dependencies.Value.PSObject.Properties[$PackageName] } else { $null }
         if ($null -eq $dependency) {
-            Write-Log "Global npm package not installed: $PackageName"
-            return $null
+            $state.Status = 'NOT_INSTALLED'
+            $state.Detail = 'Глобальный npm-пакет не установлен в активном npm-каталоге'
+            return $state
+        }
+        $version = ConvertTo-VersionOrNull $dependency.Value.version
+        if ($null -eq $version) {
+            $state.Detail = 'Пакет найден, но его установленную версию не удалось прочитать'
+            return $state
         }
 
-        return ConvertTo-VersionOrNull $dependency.version
+        $state.Status = 'INSTALLED'
+        $state.Version = $version
     } catch {
         Write-Log "Failed to parse npm list output for ${PackageName}: $($_.Exception.Message)"
-        return $null
+        $state.Detail = 'Не удалось выполнить проверку или разобрать список глобальных пакетов npm'
     }
+    return $state
+}
+
+function Get-NpmGlobalPackageVersion {
+    param([string]$PackageName)
+
+    $state = Get-NpmGlobalPackageState $PackageName
+    if ($state.Status -eq 'INSTALLED') { return $state.Version }
+    Write-Log "${PackageName}: $($state.Detail)"
+    return $null
 }
 
 function Get-CodexDesktopProcesses {
@@ -1415,6 +1442,7 @@ try {
     foreach ($step in $steps.GetEnumerator()) {
         $stepVendor = if ($step.Key -match 'Codex') { 'OpenAI' } elseif ($step.Key -match 'Claude') { 'Anthropic' } else { 'Google' }
         if ((-not $OnlyStage -or $step.Key -eq $OnlyStage) -and (-not $Vendor -or $stepVendor -eq $Vendor)) {
+            $failureBeforeAction = $script:FailureCount
             if ($CheckOnly) {
                 $stageName = $step.Key
                 Invoke-UpdateStep -Name $stageName -ScriptBlock { Invoke-CheckStage $stageName }
@@ -1423,6 +1451,14 @@ try {
                 Invoke-UpdateStep -Name $stageName -ScriptBlock { Invoke-ComponentAction -Stage $stageName -Action $Action }
             } else {
                 Invoke-UpdateStep -Name $step.Key -ScriptBlock $step.Value
+            }
+            if (-not $CheckOnly -and $script:FailureCount -eq $failureBeforeAction) {
+                if ($Action -eq 'Uninstall') {
+                    Write-CheckResult $step.Key 'NOT_INSTALLED' 'Component removed'
+                } else {
+                    try { Invoke-CheckStage $step.Key }
+                    catch { Write-CheckResult $step.Key 'UNKNOWN' "Post-action check failed: $($_.Exception.Message)" }
+                }
             }
         }
     }

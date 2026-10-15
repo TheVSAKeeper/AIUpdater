@@ -4,101 +4,178 @@ using System.Windows.Media;
 
 namespace AIUpdater;
 
+public enum PackageStatus
+{
+    None = 0,
+    NotInstalled = 1,
+    UpToDate = 2,
+    UpdateAvailable = 3,
+    Unknown = 4,
+    DirectUpdate = 5,
+    CheckFailed = 6
+}
+
+public enum OperationState
+{
+    None = 0,
+    Queued = 1,
+    Checking = 2,
+    Installing = 3,
+    Updating = 4,
+    Uninstalling = 5,
+    Failed = 6,
+    Stopped = 7
+}
+
 public sealed class UpdateStage : INotifyPropertyChanged
 {
-    private string _status = "Ожидание";
-    private Brush _statusBrush = Brushes.Gray;
-    private Brush _indicatorBrush = new SolidColorBrush(Color.FromRgb(100, 116, 139));
-
+    private bool _isSelectedForUpdate;
     public required string Id { get; init; }
     public required string Name { get; init; }
     public required string Vendor { get; init; }
-    public string? CheckResult { get; private set; }
+    public PackageStatus PackageStatus { get; private set; }
+    public OperationState OperationState { get; private set; }
+    public string? InstalledVersion { get; private set; }
+    public string? AvailableVersion { get; private set; }
+    public DateTimeOffset? CheckedAt { get; private set; }
+    public string? Info { get; private set; }
+    public bool HasUpdate => PackageStatus == PackageStatus.UpdateAvailable;
+    public bool CanSelectForUpdate => HasUpdate || PackageStatus == PackageStatus.DirectUpdate;
+    public bool CanUpdate => PackageStatus is PackageStatus.UpToDate or PackageStatus.UpdateAvailable or PackageStatus.Unknown or PackageStatus.DirectUpdate or PackageStatus.CheckFailed;
     public bool CanManageInstallation => !Id.EndsWith("plugins", StringComparison.Ordinal);
-
-    public void SetInstallationResult(bool installed)
+    public string? CheckResult => PackageStatus switch
     {
-        SetCompleted();
-        CheckResult = installed ? null : "NOT_INSTALLED";
-        Status = installed ? "Установлено" : "Удалено";
+        PackageStatus.NotInstalled => "NOT_INSTALLED",
+        PackageStatus.UpToDate => "CURRENT",
+        PackageStatus.UpdateAvailable => "AVAILABLE",
+        PackageStatus.Unknown => "UNKNOWN",
+        PackageStatus.DirectUpdate => "DIRECT",
+        PackageStatus.CheckFailed => "ERROR",
+        _ => null
+    };
+
+    public bool IsSelectedForUpdate
+    {
+        get => _isSelectedForUpdate;
+        set
+        {
+            if (_isSelectedForUpdate == value) return;
+            _isSelectedForUpdate = value;
+            Notify();
+        }
     }
 
-    public string Status
+    public string VersionDisplayText => InstalledVersion is null
+        ? AvailableVersion is null ? PackageStatus == PackageStatus.DirectUpdate ? Info ?? "" : "" : $"Доступна v{AvailableVersion}"
+        : HasUpdate && AvailableVersion is not null
+            ? $"v{InstalledVersion} → v{AvailableVersion}"
+            : $"v{InstalledVersion}";
+
+    public string VersionPrefixText => HasUpdate && InstalledVersion is not null && AvailableVersion is not null
+        ? $"v{InstalledVersion} → " : VersionDisplayText;
+    public string VersionTargetText => HasUpdate && InstalledVersion is not null && AvailableVersion is not null
+        ? $"v{AvailableVersion}" : "";
+    public Brush VersionBrush => PackageStatus == PackageStatus.UpToDate ? Brushes.MediumAquamarine : Brushes.LightSlateGray;
+    public Brush VersionTargetBrush => HasUpdate ? Brushes.Gold : VersionBrush;
+    public string CardActionName => CanSelectForUpdate ? $"Выбрать обновление: {Name}" : $"Проверить: {Name}";
+
+    public string ResultDescription => CheckedAt is null ? "Проверка ещё не выполнялась"
+        : $"Последняя проверка: {CheckedAt.Value.ToLocalTime():dd.MM.yyyy HH:mm}\n{VersionDisplayText}"
+            + (string.IsNullOrWhiteSpace(Info) || Info == VersionDisplayText ? "" : $"\n{Info}");
+
+    public string Status => OperationState switch
     {
-        get => _status;
-        private set => SetField(ref _status, value);
+        OperationState.Queued => "В очереди",
+        OperationState.Checking => "Проверка…",
+        OperationState.Installing => "Установка…",
+        OperationState.Updating => "Обновление…",
+        OperationState.Uninstalling => "Удаление…",
+        OperationState.Failed => "Ошибка выполнения",
+        OperationState.Stopped => "Остановлено",
+        _ => PackageStatus switch
+        {
+            PackageStatus.NotInstalled => "Не установлено",
+            PackageStatus.UpToDate => "Актуально",
+            PackageStatus.UpdateAvailable => "Есть обновление",
+            PackageStatus.Unknown => "Не удалось сравнить",
+            PackageStatus.DirectUpdate => "Обновляется напрямую",
+            PackageStatus.CheckFailed => "Ошибка проверки",
+            _ => "Не проверено"
+        }
+    };
+
+    public Brush StatusBrush => OperationState switch
+    {
+        OperationState.Failed => Brushes.LightCoral,
+        OperationState.Checking or OperationState.Installing or OperationState.Updating or OperationState.Uninstalling => Brushes.Aquamarine,
+        OperationState.Queued or OperationState.Stopped => Brushes.LightSlateGray,
+        _ => PackageStatus switch
+        {
+            PackageStatus.UpdateAvailable => Brushes.Gold,
+            PackageStatus.UpToDate => Brushes.MediumAquamarine,
+            PackageStatus.CheckFailed => Brushes.LightCoral,
+            _ => Brushes.LightSlateGray
+        }
+    };
+    public Brush IndicatorBrush => StatusBrush;
+
+    public void Queue()
+    {
+        OperationState = OperationState.Queued;
+        Refresh();
     }
 
-    public Brush StatusBrush
+    public void SetRunning(OperationState state)
     {
-        get => _statusBrush;
-        private set => SetField(ref _statusBrush, value);
-    }
-
-    public Brush IndicatorBrush
-    {
-        get => _indicatorBrush;
-        private set => SetField(ref _indicatorBrush, value);
-    }
-
-    public void Reset()
-    {
-        CheckResult = null;
-        Status = "Ожидание";
-        StatusBrush = new SolidColorBrush(Color.FromRgb(148, 163, 184));
-        IndicatorBrush = new SolidColorBrush(Color.FromRgb(100, 116, 139));
-    }
-
-    public void SetRunning()
-    {
-        Status = "Выполняется";
-        StatusBrush = new SolidColorBrush(Color.FromRgb(110, 231, 183));
-        IndicatorBrush = new SolidColorBrush(Color.FromRgb(110, 231, 183));
+        OperationState = state;
+        Refresh();
     }
 
     public void SetCompleted()
     {
-        Status = "Готово";
-        StatusBrush = new SolidColorBrush(Color.FromRgb(52, 211, 153));
-        IndicatorBrush = new SolidColorBrush(Color.FromRgb(52, 211, 153));
+        OperationState = OperationState.None;
+        Refresh();
     }
 
-    public void SetFailed()
+    public void SetFailed(bool stopped = false)
     {
-        Status = "Ошибка";
-        StatusBrush = new SolidColorBrush(Color.FromRgb(248, 113, 113));
-        IndicatorBrush = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+        OperationState = stopped ? OperationState.Stopped : OperationState.Failed;
+        Refresh();
     }
 
-    public void SetCheckResult(string result)
+    public void SetCheckResult(string result, string? installedVersion = null, string? availableVersion = null,
+        DateTimeOffset? checkedAt = null, string? info = null)
     {
-        CheckResult = result;
-        Status = result switch
+        PackageStatus = result switch
         {
-            "AVAILABLE" => "Есть обновление",
-            "CURRENT" => "Актуально",
-            "NOT_INSTALLED" => "Не установлено",
-            _ => "Не удалось сравнить"
+            "AVAILABLE" => PackageStatus.UpdateAvailable,
+            "CURRENT" => PackageStatus.UpToDate,
+            "NOT_INSTALLED" => PackageStatus.NotInstalled,
+            "DIRECT" => PackageStatus.DirectUpdate,
+            "ERROR" => PackageStatus.CheckFailed,
+            _ => PackageStatus.Unknown
         };
-        StatusBrush = result switch
-        {
-            "AVAILABLE" => new SolidColorBrush(Color.FromRgb(251, 191, 36)),
-            "CURRENT" => new SolidColorBrush(Color.FromRgb(52, 211, 153)),
-            _ => new SolidColorBrush(Color.FromRgb(148, 163, 184))
-        };
-        IndicatorBrush = StatusBrush;
+        InstalledVersion = installedVersion;
+        AvailableVersion = availableVersion;
+        CheckedAt = checkedAt ?? DateTimeOffset.Now;
+        Info = info;
+        IsSelectedForUpdate = HasUpdate;
+        Refresh();
+    }
+
+    public void InvalidateResult()
+    {
+        PackageStatus = PackageStatus.None;
+        InstalledVersion = null;
+        AvailableVersion = null;
+        CheckedAt = null;
+        Info = null;
+        IsSelectedForUpdate = false;
+        Refresh();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
-
-    private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
-    {
-        if (EqualityComparer<T>.Default.Equals(field, value))
-        {
-            return;
-        }
-
-        field = value;
+    private void Notify([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-    }
+    private void Refresh() => Notify("");
 }

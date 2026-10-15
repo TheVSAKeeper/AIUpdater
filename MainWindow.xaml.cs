@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -14,6 +15,9 @@ public partial class MainWindow
 {
     private readonly string _scriptPath;
     private readonly string _logPath;
+    private readonly string _resultsPath;
+    private UpdateStage[] _runStages = [];
+    private sealed record PackageResult(string Stage, string Result, string? Installed, string? Available, DateTimeOffset? CheckedAt = null, string? Info = null);
     private readonly List<Process> _processes = [];
     public ObservableCollection<VendorStatus> Vendors { get; } = [];
     private bool _isRunning;
@@ -32,6 +36,7 @@ public partial class MainWindow
         public string Vendor { get; } = vendor;
         public UpdateStage? ActiveStage { get; set; }
         public bool SawError { get; set; }
+        public HashSet<string> ResultStages { get; } = [];
         public StringBuilder OutputBuffer { get; } = new();
         public StringBuilder ErrorBuffer { get; } = new();
     }
@@ -62,12 +67,11 @@ public partial class MainWindow
         Directory.CreateDirectory(logDirectory);
         _scriptPath = Path.Combine(AppContext.BaseDirectory, "Update-Codex.ps1");
         _logPath = Path.Combine(logDirectory, "Update-Codex-last.log");
-        ScriptPathText.ToolTip = $"Скрипт: {_scriptPath}\nЖурналы: {logDirectory}";
+        LogFolderButton.ToolTip = $"Скрипт: {_scriptPath}\nЖурналы: {logDirectory}";
 
+        _resultsPath = Path.Combine(logDirectory, "LastResults.json");
         foreach (var stage in Stages)
-        {
-            stage.Reset();
-        }
+            stage.PropertyChanged += (_, _) => RefreshUpdateButton();
 
         foreach (var vendor in Stages.Select(stage => stage.Vendor).Distinct())
         {
@@ -77,11 +81,13 @@ public partial class MainWindow
             AddVendorTab(status);
             if (File.Exists(status.LogPath))
             {
-                try { status.Log = File.ReadAllText(status.LogPath, Encoding.UTF8); }
+                try { status.Log = "История прошлого запуска\n" + File.ReadAllText(status.LogPath, Encoding.UTF8); }
                 catch (IOException) { }
             }
         }
         LoadLastLog();
+        LoadResults();
+        RefreshUpdateButton();
     }
 
     private void AddVendorTab(VendorStatus vendor)
@@ -103,8 +109,9 @@ public partial class MainWindow
             Background = new SolidColorBrush(Color.FromRgb(12, 23, 18)),
             Foreground = new SolidColorBrush(Color.FromRgb(204, 228, 214)),
             FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
         };
         log.SetBinding(TextBox.TextProperty, new Binding(nameof(VendorStatus.Log)) { Mode = BindingMode.OneWay });
         log.TextChanged += (_, _) => log.ScrollToEnd();
@@ -136,14 +143,44 @@ public partial class MainWindow
         _changelogWindow.Show();
     }
 
-    private void CheckMode_Changed(object sender, RoutedEventArgs e)
+    private void RefreshUpdateButton()
     {
-        if (RunButton is null || ModeDescriptionText is null) return;
-        var checkOnly = CheckOnlyCheckBox.IsChecked == true;
-        RunButton.Content = checkOnly ? "Проверить всё" : "Обновить всё";
-        ModeDescriptionText.Text = checkOnly
-            ? "Сравнить версии без установки обновлений"
-            : "Проверить и установить обновления; приложения могут быть перезапущены";
+        var count = Stages.Count(stage => stage.CanSelectForUpdate && stage.IsSelectedForUpdate);
+        UpdateButton.Content = $"Обновить выбранные ({count})";
+        UpdateButton.IsEnabled = !_isRunning && count > 0;
+    }
+
+    private void CardMenuButton_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not DependencyObject element) return;
+        while (element is not null)
+        {
+            if (element is Border { ContextMenu: { } menu } card)
+            {
+                menu.PlacementTarget = card;
+                menu.IsOpen = true;
+                return;
+            }
+            element = VisualTreeHelper.GetParent(element);
+        }
+    }
+
+    private async void CheckComponent_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: UpdateStage stage }) await RunUpdaterAsync(stage);
+    }
+
+    private async void UpdateComponent_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: UpdateStage stage })
+            await RunUpdaterAsync(stage, checkOnly: false);
+    }
+
+    private async void UpdateButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = Stages.Where(stage => stage.CanSelectForUpdate && stage.IsSelectedForUpdate).ToArray();
+        if (selected.Length > 0) await RunUpdaterAsync(null, checkOnly: false, selected: selected);
     }
 
     private static string CheckSummary(IEnumerable<UpdateStage> stages)
@@ -151,8 +188,22 @@ public partial class MainWindow
         var selected = stages.ToArray();
         var available = selected.Count(stage => stage.CheckResult == "AVAILABLE");
         var unknown = selected.Count(stage => stage.CheckResult == "UNKNOWN");
+        var errors = selected.Count(stage => stage.CheckResult == "ERROR");
         var absent = selected.Count(stage => stage.CheckResult == "NOT_INSTALLED");
-        return $"Обновлений: {available} · Не удалось сравнить: {unknown} · Не установлено: {absent}";
+        var direct = selected.Count(stage => stage.CheckResult == "DIRECT");
+        var uncheckedCount = selected.Count(stage => stage.CheckResult is null);
+        var parts = new List<string>();
+        if (available > 0) parts.Add($"Доступно обновлений: {available}");
+        if (unknown > 0) parts.Add($"Не удалось сравнить: {unknown}");
+        if (errors > 0) parts.Add($"Ошибок проверки: {errors}");
+        if (direct > 0) parts.Add($"Обновляются напрямую: {direct}");
+        if (absent > 0) parts.Add($"Не установлено: {absent}");
+        if (uncheckedCount > 0) parts.Add($"Не проверено: {uncheckedCount}");
+        if (selected.Length == 0) return "Нет результатов проверки";
+        if (parts.Count == 0) return "Все инструменты актуальны";
+        if (available > 0 && available < selected.Length && unknown + errors + direct + absent + uncheckedCount == 0)
+            parts.Add("Остальные актуальны");
+        return string.Join(" · ", parts);
     }
 
     private async void RunButton_Click(object sender, RoutedEventArgs e)
@@ -162,8 +213,14 @@ public partial class MainWindow
 
     private async void StageButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_isRunning) return;
         if (sender is FrameworkElement { DataContext: UpdateStage stage })
         {
+            if (stage.CanSelectForUpdate)
+            {
+                stage.IsSelectedForUpdate = !stage.IsSelectedForUpdate;
+                return;
+            }
             await RunUpdaterAsync(stage);
         }
     }
@@ -172,30 +229,38 @@ public partial class MainWindow
     {
         if (_isRunning || sender is not MenuItem { DataContext: UpdateStage stage, Tag: string action }
             || !stage.CanManageInstallation) return;
-        if (action == "Uninstall" && MessageBox.Show(this, $"Удалить {stage.Name}?",
-                "Удаление компонента", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+        if (action == "Uninstall" && !AppDialog.Show(this, $"Удалить {stage.Name}?", "Удаление компонента", confirmation: true))
             return;
         await RunUpdaterAsync(stage, action);
     }
 
-    private async Task RunUpdaterAsync(UpdateStage? requestedStage, string action = "Update")
+    private async Task RunUpdaterAsync(UpdateStage? requestedStage, string action = "Update", bool checkOnly = true, UpdateStage[]? selected = null)
     {
         if (_isRunning) return;
         if (!File.Exists(_scriptPath))
         {
-            MessageBox.Show(this, $"Скрипт не найден:\n{_scriptPath}", "AI Updater", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Show(this, $"Скрипт не найден:\n{_scriptPath}", "AI Updater");
             return;
         }
         _action = action;
-        _checkOnly = action == "Update" && CheckOnlyCheckBox.IsChecked == true;
-        PrepareRun(requestedStage);
+        _checkOnly = action == "Update" && checkOnly;
+        _runStages = selected ?? (requestedStage is null ? Stages.ToArray() : [requestedStage]);
         try
         {
+            PrepareRun(requestedStage);
             File.WriteAllText(_logPath, $"AI update run: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}" + Environment.NewLine, Encoding.UTF8);
-            var vendors = requestedStage is null
-                ? Stages.Select(stage => stage.Vendor).Distinct().ToArray()
-                : [requestedStage.Vendor];
-            var results = await Task.WhenAll(vendors.Select(vendor => RunVendorAsync(vendor, requestedStage)));
+            var vendors = _runStages.Select(stage => stage.Vendor).Distinct().ToArray();
+            var results = await Task.WhenAll(vendors.Select(async vendor =>
+            {
+                if (selected is null) return await RunVendorAsync(vendor, requestedStage);
+                var result = 0;
+                foreach (var stage in _runStages.Where(stage => stage.Vendor == vendor))
+                {
+                    if (_stopRequested) break;
+                    if (await RunVendorAsync(vendor, stage) != 0) result = 1;
+                }
+                return result;
+            }));
             FinishRun(results.All(code => code == 0) ? 0 : 1);
         }
         catch (Exception exception)
@@ -237,7 +302,6 @@ public partial class MainWindow
         var exitCode = -1;
         try
         {
-            File.WriteAllText(vendorStatus.LogPath, $"{vendor}: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}" + Environment.NewLine, Encoding.UTF8);
             process.Start();
             _processes.Add(process);
             await Task.WhenAll(process.WaitForExitAsync(),
@@ -258,32 +322,41 @@ public partial class MainWindow
         finally
         {
             _processes.Remove(process);
+            if (exitCode == 0 && !_stopRequested)
+            {
+                foreach (var stage in _runStages.Where(stage => stage.Vendor == vendor &&
+                             (requestedStage is null || stage == requestedStage) && !run.ResultStages.Contains(stage.Id)))
+                {
+                    stage.SetFailed();
+                    run.SawError = true;
+                    AppendLine($"Скрипт не передал результат: {stage.Name}", vendor);
+                }
+            }
             foreach (var stage in Stages.Where(stage => stage.Vendor == vendor &&
                          (requestedStage is null || stage == requestedStage) &&
-                         stage.Status is "Выполняется" or "Ожидание"))
+                         stage.OperationState is OperationState.Queued or OperationState.Checking or OperationState.Installing or OperationState.Updating or OperationState.Uninstalling))
             {
                 if (exitCode == 0 && !run.SawError && !_stopRequested) stage.SetCompleted();
-                else stage.SetFailed();
+                else stage.SetFailed(_stopRequested);
             }
             var successful = exitCode == 0 && !run.SawError && !_stopRequested;
-            if (successful && requestedStage is not null && _action != "Update")
-                requestedStage.SetInstallationResult(_action == "Install");
             vendorStatus.SetStatus(_stopRequested ? "Остановлено" : successful ? "Готово" : "Ошибка",
-                _stopRequested ? "Остановка запрошена пользователем" : successful ? $"{OperationName}: завершено" : $"Завершено с ошибками (код {exitCode})",
+                _stopRequested ? "Остановка запрошена пользователем" : successful ? $"{OperationName}: завершено" : "Завершено с ошибками" + (exitCode == 0 ? "" : $" (код {exitCode})"),
                 _stopRequested ? Brushes.LightSlateGray : successful ? (Brush)FindResource("AccentTextBrush") : Brushes.LightCoral);
             if (_checkOnly && successful)
             {
                 var selected = Stages.Where(stage => stage.Vendor == vendor && (requestedStage is null || stage == requestedStage)).ToArray();
                 var available = selected.Any(stage => stage.CheckResult == "AVAILABLE");
                 var unknown = selected.Any(stage => stage.CheckResult == "UNKNOWN");
-                vendorStatus.SetStatus(available ? "Есть обновления" : unknown ? "Проверено частично" : "Проверено",
-                    CheckSummary(selected), available ? Brushes.Gold : (Brush)FindResource("AccentTextBrush"));
+                var errors = selected.Any(stage => stage.CheckResult == "ERROR");
+                vendorStatus.SetStatus(errors ? "Ошибка проверки" : available ? "Есть обновления" : unknown ? "Проверено частично" : "Проверено",
+                    CheckSummary(selected), errors ? Brushes.LightCoral : available ? Brushes.Gold : (Brush)FindResource("AccentTextBrush"));
             }
             AppendLine(vendorStatus.Detail, vendor);
             _sawError |= run.SawError;
             try { File.Delete(temporaryLog); } catch (IOException) { }
         }
-        return exitCode;
+        return exitCode == 0 && run.SawError ? 1 : exitCode;
     }
 
     private void StopButton_Click(object sender, RoutedEventArgs e)
@@ -304,11 +377,16 @@ public partial class MainWindow
             ? vendor.LogPath : _logPath;
         if (!File.Exists(selectedPath))
         {
-            MessageBox.Show(this, "Лог последнего запуска ещё не создан.", "AI Updater", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppDialog.Show(this, "Лог последнего запуска ещё не создан.", "AI Updater");
             return;
         }
 
         Process.Start(new ProcessStartInfo(selectedPath) { UseShellExecute = true });
+    }
+
+    private void LogFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        Process.Start(new ProcessStartInfo(Path.GetDirectoryName(_logPath)!) { UseShellExecute = true });
     }
 
     private void PrepareRun(UpdateStage? requestedStage)
@@ -320,11 +398,12 @@ public partial class MainWindow
         LogTextBox.Clear();
         foreach (var stage in Stages)
         {
-            if (requestedStage is null || stage == requestedStage) stage.Reset();
+            if (_runStages.Contains(stage)) stage.Queue();
         }
-        foreach (var vendor in Vendors.Where(item => requestedStage is null || item.Name == requestedStage.Vendor))
+        foreach (var vendor in Vendors.Where(item => _runStages.Any(stage => stage.Vendor == item.Name)))
         {
             vendor.Log = "";
+            File.WriteAllText(vendor.LogPath, $"{vendor.Name}: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}" + Environment.NewLine, Encoding.UTF8);
             vendor.SetStatus("Ожидание", "Подготовка к запуску", Brushes.LightSlateGray);
         }
 
@@ -334,8 +413,9 @@ public partial class MainWindow
         if (_action != "Update") OverallStatusText.Text = $"{OperationName}: {requestedStage?.Name}";
         RunProgressBar.Visibility = Visibility.Visible;
         RunButton.IsEnabled = false;
-        CheckOnlyCheckBox.IsEnabled = false;
+        RefreshUpdateButton();
         StageItemsControl.IsEnabled = false;
+        StopButton.Visibility = Visibility.Visible;
         StopButton.IsEnabled = true;
     }
 
@@ -439,37 +519,55 @@ public partial class MainWindow
             return;
         }
 
+        var payload = Regex.Match(trimmed, @"^\[\d{2}:\d{2}:\d{2}\] UI_RESULT (?<json>.+)$");
+        if (payload.Success)
+        {
+            try
+            {
+                var result = JsonSerializer.Deserialize<PackageResult>(payload.Groups["json"].Value);
+                var stage = _runStages.FirstOrDefault(item => item.Vendor == run.Vendor && item.Id == result?.Stage);
+                if (stage is null || result is null || result.Result is not ("AVAILABLE" or "CURRENT" or "UNKNOWN" or "NOT_INSTALLED" or "DIRECT" or "ERROR"))
+                    throw new JsonException("Неизвестный компонент или результат");
+                stage.SetCheckResult(result.Result, result.Installed, result.Available, info: result.Info);
+                run.ResultStages.Add(stage.Id);
+            }
+            catch (JsonException exception)
+            {
+                run.SawError = true;
+                run.ActiveStage?.SetFailed();
+                AppendLine($"Не удалось прочитать результат проверки: {exception.Message}", run.Vendor);
+            }
+            return;
+        }
         AppendLine(trimmed, run.Vendor);
         UpdateStageFromLine(trimmed, isError, run);
     }
 
     private void UpdateStageFromLine(string line, bool isError, VendorRun run)
     {
-        var check = Regex.Match(line, @"=== CHECK (?<result>AVAILABLE|CURRENT|UNKNOWN|NOT_INSTALLED): (?<stage>.+) ===");
-        if (check.Success)
-        {
-            var checkedStage = Stages.FirstOrDefault(item => item.Vendor == run.Vendor && item.Id == check.Groups["stage"].Value);
-            checkedStage?.SetCheckResult(check.Groups["result"].Value);
-            return;
-        }
         var result = Regex.Match(line, @"=== (?<result>COMPLETED|FAILED): (?<stage>.+) ===");
         if (result.Success)
         {
-            var finishedStage = Stages.FirstOrDefault(item => item.Id == result.Groups["stage"].Value);
+            var finishedStage = _runStages.FirstOrDefault(item => item.Vendor == run.Vendor && item.Id == result.Groups["stage"].Value);
             if (result.Groups["result"].Value == "FAILED")
             {
                 finishedStage?.SetFailed();
                 run.SawError = true;
             }
-            else if (finishedStage?.Status != "Ошибка" && finishedStage?.CheckResult is null) finishedStage?.SetCompleted();
+            else if (finishedStage?.OperationState != OperationState.Failed) finishedStage?.SetCompleted();
             return;
         }
-        var stage = Stages.FirstOrDefault(item => line.Contains($"=== {item.Id} ===", StringComparison.OrdinalIgnoreCase));
+        var stage = _runStages.FirstOrDefault(item => item.Vendor == run.Vendor && line.Contains($"=== {item.Id} ===", StringComparison.OrdinalIgnoreCase));
         if (stage is not null)
         {
-            if (run.ActiveStage?.Status == "Выполняется") run.ActiveStage.SetCompleted();
+            if (run.ActiveStage is { OperationState: not OperationState.Failed }) run.ActiveStage.SetCompleted();
             run.ActiveStage = stage;
-            stage.SetRunning();
+            stage.SetRunning(_action switch
+            {
+                "Install" => OperationState.Installing,
+                "Uninstall" => OperationState.Uninstalling,
+                _ => _checkOnly ? OperationState.Checking : OperationState.Updating
+            });
             Vendors.First(item => item.Name == run.Vendor).Detail = stage.Name;
             return;
         }
@@ -496,13 +594,64 @@ public partial class MainWindow
         if (_checkOnly && success)
             OverallStatusText.Text = CheckSummary(Stages.Where(stage => _requestedStage is null || stage == _requestedStage));
         else if (success)
-            OverallStatusText.Text = $"{OperationName}: завершено" + (_requestedStage is null ? "" : $" — {_requestedStage.Name}");
+            OverallStatusText.Text = $"{OperationName}: завершено" + (_requestedStage is null ? "" : $" – {_requestedStage.Name}");
         RunProgressBar.Visibility = Visibility.Hidden;
         RunButton.IsEnabled = true;
-        CheckOnlyCheckBox.IsEnabled = true;
+
         StageItemsControl.IsEnabled = true;
         StopButton.IsEnabled = false;
+        StopButton.Visibility = Visibility.Collapsed;
         _isRunning = false;
+        foreach (var stage in _runStages.Where(stage => stage.OperationState is OperationState.Queued or OperationState.Checking or OperationState.Installing or OperationState.Updating or OperationState.Uninstalling))
+            stage.SetFailed(_stopRequested);
+        foreach (var vendor in Vendors) RefreshVendorSummary(vendor);
+        RefreshUpdateButton();
+        SaveResults();
+    }
+
+    private void RefreshVendorSummary(VendorStatus vendor)
+    {
+        var errors = vendor.Stages.Count(stage => stage.OperationState == OperationState.Failed || stage.PackageStatus == PackageStatus.CheckFailed);
+        var stopped = vendor.Stages.Count(stage => stage.OperationState == OperationState.Stopped);
+        var updates = vendor.Stages.Count(stage => stage.HasUpdate);
+        vendor.SetStatus(errors > 0 ? $"Ошибок: {errors}" : stopped > 0 ? "Остановлено" : updates > 0 ? $"Обновлений: {updates}" : "",
+            CheckSummary(vendor.Stages), errors > 0 ? Brushes.LightCoral : updates > 0 ? Brushes.Gold : Brushes.LightSlateGray);
+    }
+
+    private void LoadResults()
+    {
+        if (!File.Exists(_resultsPath)) return;
+        try
+        {
+            var results = JsonSerializer.Deserialize<PackageResult[]>(File.ReadAllText(_resultsPath, Encoding.UTF8));
+            foreach (var result in results ?? [])
+            {
+                if (result is null || result.CheckedAt is null || result.Result is not ("AVAILABLE" or "CURRENT" or "UNKNOWN" or "NOT_INSTALLED" or "DIRECT" or "ERROR")) continue;
+                Stages.FirstOrDefault(stage => stage.Id == result.Stage)?.SetCheckResult(result.Result, result.Installed, result.Available, result.CheckedAt, result.Info);
+            }
+            foreach (var vendor in Vendors) RefreshVendorSummary(vendor);
+            if (Stages.Any(stage => stage.CheckedAt is not null))
+                OverallStatusText.Text = "Показаны последние результаты. Нажмите «Проверить всё», чтобы обновить их.";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            AppendLine($"Не удалось загрузить результаты: {exception.Message}");
+        }
+    }
+
+    private void SaveResults()
+    {
+        try
+        {
+            var results = Stages.Where(stage => stage.CheckResult is not null)
+                .Select(stage => new PackageResult(stage.Id, stage.CheckResult!, stage.InstalledVersion, stage.AvailableVersion, stage.CheckedAt, stage.Info)).ToArray();
+            File.WriteAllText(_resultsPath + ".tmp", JsonSerializer.Serialize(results), Encoding.UTF8);
+            File.Move(_resultsPath + ".tmp", _resultsPath, true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            AppendLine($"Не удалось сохранить результаты: {exception.Message}");
+        }
     }
 
     private void AppendLine(string line, string? vendorName = null)
@@ -536,7 +685,7 @@ public partial class MainWindow
 
         try
         {
-            LogTextBox.Text = File.ReadAllText(_logPath, Encoding.UTF8);
+            LogTextBox.Text = "История прошлого запуска. Карточки показывают отдельно сохранённые результаты.\n" + File.ReadAllText(_logPath, Encoding.UTF8);
             LogTextBox.ScrollToEnd();
         }
         catch

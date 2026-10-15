@@ -6,7 +6,7 @@ namespace AIUpdater;
 
 public sealed class VendorStatus(string name, string logPath) : INotifyPropertyChanged
 {
-    private string _status = "Ожидание";
+    private string _status = "";
     private string _detail = "Готов к проверке обновлений";
     private string _log = "";
     private Brush _brush = Brushes.Gray;
