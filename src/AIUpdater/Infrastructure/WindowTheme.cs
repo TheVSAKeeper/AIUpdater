@@ -2,7 +2,7 @@
 using System.Windows;
 using System.Windows.Interop;
 
-namespace AIUpdater;
+namespace AIUpdater.Infrastructure;
 
 internal static class WindowTheme
 {
@@ -14,8 +14,10 @@ internal static class WindowTheme
         SetAttribute(handle, 36, 0x00F1F7ED); // DWMWA_TEXT_COLOR
     }
 
-    private static void SetAttribute(nint handle, int attribute, int value) =>
+    private static void SetAttribute(nint handle, int attribute, int value)
+    {
         DwmSetWindowAttribute(handle, attribute, ref value, sizeof(int));
+    }
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(nint window, int attribute, ref int value, int size);

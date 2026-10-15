@@ -1,3 +1,8 @@
 ﻿<Solution>
-  <Project Path="AIUpdater.csproj" />
+    <Folder Name="/src/">
+        <Project Path="src/AIUpdater/AIUpdater.csproj" />
+    </Folder>
+    <Folder Name="/tests/">
+        <Project Path="tests/AIUpdater.InterfaceChecks/AIUpdater.InterfaceChecks.csproj" />
+    </Folder>
 </Solution>

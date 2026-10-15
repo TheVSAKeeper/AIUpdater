@@ -11,12 +11,20 @@ $logDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData'))
 $backupDirectory = Join-Path $projectRoot 'artifacts\desktop-previous'
 
 # Publish to a fresh directory so an open application can keep running.
-& dotnet publish (Join-Path $projectRoot 'AIUpdater.csproj') -c Release --self-contained false -o $publishDirectory
-if ($LASTEXITCODE -ne 0) { throw "Ошибка публикации: $LASTEXITCODE" }
+& dotnet publish (Join-Path $projectRoot 'src\AIUpdater\AIUpdater.csproj') -c Release --self-contained false -o $publishDirectory
+if ($LASTEXITCODE -ne 0)
+{
+    throw "Ошибка публикации: $LASTEXITCODE"
+}
 $executable = Join-Path $publishDirectory 'AIUpdater.exe'
-if (-not (Test-Path -LiteralPath $executable)) { throw "Приложение не найдено: $executable" }
-foreach ($scriptName in @('Update-Codex.ps1', 'Check-Updates.ps1', 'Manage-Components.ps1')) {
-    if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory $scriptName))) {
+if (-not (Test-Path -LiteralPath $executable))
+{
+    throw "Приложение не найдено: $executable"
+}
+foreach ($scriptName in @('Update-Codex.ps1', 'Check-Updates.ps1', 'Manage-Components.ps1'))
+{
+    if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory $scriptName)))
+    {
         throw "В публикации отсутствует скрипт: $scriptName"
     }
 }
@@ -36,30 +44,43 @@ chcp 65001 >nul
 pwsh -NoProfile -ExecutionPolicy Bypass -File "$updateScript"
 pause
 "@
-[IO.File]::WriteAllText((Join-Path $desktopDirectory 'Обновить AIUpdater.cmd'), $command + "`r`n", [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText((Join-Path $desktopDirectory 'Обновить AIUpdater.cmd'), $command + "`r`n",[Text.UTF8Encoding]::new($false))
 
 # Preserve old desktop files while moving them out of the desktop.
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
-foreach ($logName in @('Update-Codex-last.log', 'Update-Codex-OpenAI-last.log', 'Update-Codex-Anthropic-last.log', 'Update-Codex-Google-last.log')) {
+foreach ($logName in @('Update-Codex-last.log', 'Update-Codex-OpenAI-last.log', 'Update-Codex-Anthropic-last.log', 'Update-Codex-Google-last.log'))
+{
     $source = Join-Path $desktopDirectory $logName
-    if (-not (Test-Path -LiteralPath $source)) { continue }
+    if (-not (Test-Path -LiteralPath $source))
+    {
+        continue
+    }
     $destination = Join-Path $logDirectory $logName
-    if (Test-Path -LiteralPath $destination) {
-        $destination = Join-Path $logDirectory ("{0}-{1}.log" -f [IO.Path]::GetFileNameWithoutExtension($logName), [guid]::NewGuid().ToString('N'))
+    if (Test-Path -LiteralPath $destination)
+    {
+        $destination = Join-Path $logDirectory ("{0}-{1}.log" -f [IO.Path]::GetFileNameWithoutExtension($logName),[guid]::NewGuid().ToString('N'))
     }
     Move-Item -LiteralPath $source -Destination $destination
 }
 
-foreach ($oldName in @('AIUpdater', 'AIUpdater.exe.lnk', 'Update-Codex.ps1')) {
+foreach ($oldName in @('AIUpdater', 'AIUpdater.exe.lnk', 'Update-Codex.ps1'))
+{
     $source = Join-Path $desktopDirectory $oldName
-    if (-not (Test-Path -LiteralPath $source)) { continue }
+    if (-not (Test-Path -LiteralPath $source))
+    {
+        continue
+    }
     $resolvedSource = [IO.Path]::GetFullPath($source)
-    if ([IO.Path]::GetDirectoryName($resolvedSource) -ne [IO.Path]::GetFullPath($desktopDirectory)) {
+    if ([IO.Path]::GetDirectoryName($resolvedSource) -ne [IO.Path]::GetFullPath($desktopDirectory))
+    {
         throw "Неожиданный путь: $resolvedSource"
     }
     New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
     $destination = Join-Path $backupDirectory $oldName
-    if (Test-Path -LiteralPath $destination) { $destination += '-' + [guid]::NewGuid().ToString('N') }
+    if (Test-Path -LiteralPath $destination)
+    {
+        $destination += '-' + [guid]::NewGuid().ToString('N')
+    }
     Move-Item -LiteralPath $resolvedSource -Destination $destination
 }
 

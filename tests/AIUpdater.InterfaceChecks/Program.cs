@@ -1,35 +1,52 @@
-﻿using System.IO;
+﻿using AIUpdater.Models;
+using AIUpdater.Views;
+using System.IO;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
-using System.Windows.Controls.Primitives;
-using System.Windows.Automation.Peers;
-using System.Windows.Automation.Provider;
-using AIUpdater;
 
-internal static class Program
+namespace AIUpdater.InterfaceChecks;
+
+file static class Program
 {
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new InvalidOperationException(message);
+        if (!condition)
+        {
+            throw new InvalidOperationException(message);
+        }
     }
 
-    private static void Set(object target, string name, object value) =>
+    private static void Set(object target, string name, object value)
+    {
         target.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(target, value);
+    }
 
-    private static object? Call(object target, string name, params object[] args) =>
-        target.GetType().GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(target, args);
+    private static object? Call(object target, string name, params object[] args)
+    {
+        return target.GetType().GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(target, args);
+    }
 
     private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
     {
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
         {
             var child = VisualTreeHelper.GetChild(root, index);
-            if (child is T match) yield return match;
-            foreach (var descendant in Descendants<T>(child)) yield return descendant;
+            if (child is T match)
+            {
+                yield return match;
+            }
+
+            foreach (var descendant in Descendants<T>(child))
+            {
+                yield return descendant;
+            }
         }
     }
 
@@ -45,13 +62,15 @@ internal static class Program
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         while ((bool)typeof(MainWindow).GetField("_isRunning", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!)
+        {
             await Task.Delay(20, timeout.Token);
+        }
     }
 
     private static void Render(FrameworkElement view, string path, int width, int height)
     {
-        view.Measure(new Size(width, height));
-        view.Arrange(new Rect(0, 0, width, height));
+        view.Measure(new(width, height));
+        view.Arrange(new(0, 0, width, height));
         view.UpdateLayout();
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(view);
@@ -68,6 +87,7 @@ internal static class Program
             var style = Application.Current.TryFindResource(type) as Style;
             Check(style is not null && style.Setters.OfType<Setter>().Any(setter => setter.Property == Control.TemplateProperty), $"Missing application template: {type.Name}");
         }
+
         var samples = new StackPanel();
         var boxes = new[]
         {
@@ -75,12 +95,18 @@ internal static class Program
             new CheckBox { Content = "Выбрано", IsChecked = true },
             new CheckBox { Content = "Частичный выбор", IsThreeState = true, IsChecked = null },
             new CheckBox { Content = "Недоступно", IsEnabled = false },
-            new CheckBox { Content = "Выбрано, недоступно", IsChecked = true, IsEnabled = false }
+            new CheckBox { Content = "Выбрано, недоступно", IsChecked = true, IsEnabled = false },
         };
-        foreach (var box in boxes) { box.Padding = new Thickness(8); samples.Children.Add(box); }
-        var text = new TextBox { IsReadOnly = true, Text = "Тёмное текстовое поле с выделением и меню копирования", Padding = new Thickness(10), Margin = new Thickness(0, 12, 0, 0) };
+
+        foreach (var box in boxes)
+        {
+            box.Padding = new(8);
+            samples.Children.Add(box);
+        }
+
+        var text = new TextBox { IsReadOnly = true, Text = "Тёмное текстовое поле с выделением и меню копирования", Padding = new(10), Margin = new(0, 12, 0, 0) };
         samples.Children.Add(text);
-        var gallery = new Border { Background = (Brush)Application.Current.FindResource("WindowBrush"), Padding = new Thickness(20), Child = samples };
+        var gallery = new Border { Background = (Brush)Application.Current.FindResource("WindowBrush"), Padding = new(20), Child = samples };
         Render(gallery, Path.Combine(output, "checkbox-states.png"), 560, 300);
         var emptyBorder = (Border)boxes[0].Template.FindName("CheckBorder", boxes[0]);
         var checkedBorder = (Border)boxes[1].Template.FindName("CheckBorder", boxes[1]);
@@ -97,8 +123,8 @@ internal static class Program
         var textMenu = text.ContextMenu!;
         textMenu.PlacementTarget = text;
         textMenu.ApplyTemplate();
-        textMenu.Measure(new Size(260, 120));
-        textMenu.Arrange(new Rect(0, 0, 260, 120));
+        textMenu.Measure(new(260, 120));
+        textMenu.Arrange(new(0, 0, 260, 120));
         textMenu.UpdateLayout();
         Check(((MenuItem)textMenu.Items[0]).CommandTarget == text, "Copy command is not bound to the text field");
         Render(textMenu, Path.Combine(output, "text-menu.png"), 260, 90);
@@ -112,7 +138,7 @@ internal static class Program
         Render((FrameworkElement)changelog.Content, Path.Combine(output, "changelog.png"), 920, 600);
         Check(Descendants<ListBoxItem>(list).All(item => item.Template is not null), "Changelog rows lost their template");
         changelog.Close();
-        var dialogType = typeof(App).Assembly.GetType("AIUpdater.AppDialog")!;
+        var dialogType = typeof(App).Assembly.GetType("AIUpdater.Views.AppDialog")!;
         var dialog = (Window)dialogType.GetMethod("Create", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, new object?[] { null, "Удалить выбранный компонент?", "Удаление компонента", true })!;
         ((Grid)dialog.Content).Background = dialog.Background;
         Render((FrameworkElement)dialog.Content, Path.Combine(output, "confirmation.png"), 520, 170);
@@ -124,15 +150,15 @@ internal static class Program
 
     private static void CheckIcon(string output)
     {
-        using var resource = Application.GetResourceStream(new Uri("pack://application:,,,/AIUpdater;component/Assets/AIUpdater.ico")).Stream;
+        using var resource = Application.GetResourceStream(new("pack://application:,,,/AIUpdater;component/Assets/AIUpdater.ico")).Stream;
         var decoder = BitmapDecoder.Create(resource, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
         var sizes = new[] { 16, 20, 24, 32, 40, 48, 64, 128, 256 };
         Check(decoder.Frames.Select(frame => frame.PixelWidth).Order().SequenceEqual(sizes), "ICO is missing native Windows sizes");
         var drawing = new DrawingVisual();
         using (var context = drawing.RenderOpen())
         {
-            context.DrawRectangle(new SolidColorBrush(Color.FromRgb(11, 20, 17)), null, new Rect(0, 0, 620, 300));
-            context.DrawRectangle(Brushes.WhiteSmoke, null, new Rect(0, 150, 620, 150));
+            context.DrawRectangle(new SolidColorBrush(Color.FromRgb(11, 20, 17)), null, new(0, 0, 620, 300));
+            context.DrawRectangle(Brushes.WhiteSmoke, null, new(0, 150, 620, 150));
             var offset = 12;
             foreach (var frame in decoder.Frames.Where(frame => frame.PixelWidth <= 128))
             {
@@ -141,11 +167,12 @@ internal static class Program
                 pixels.CopyPixels(buffer, pixels.PixelWidth * 4, 0);
                 Check(buffer[3] == 0, "Icon corners lost transparency");
                 Check(buffer.Where((_, index) => index % 4 == 3).Any(alpha => alpha > 200), "ICO frame is empty");
-                context.DrawImage(frame, new Rect(offset, 12, frame.PixelWidth, frame.PixelHeight));
-                context.DrawImage(frame, new Rect(offset, 162, frame.PixelWidth, frame.PixelHeight));
+                context.DrawImage(frame, new(offset, 12, frame.PixelWidth, frame.PixelHeight));
+                context.DrawImage(frame, new(offset, 162, frame.PixelWidth, frame.PixelHeight));
                 offset += frame.PixelWidth + 18;
             }
         }
+
         var bitmap = new RenderTargetBitmap(620, 300, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(drawing);
         var encoder = new PngBitmapEncoder();
@@ -164,7 +191,11 @@ internal static class Program
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
         var window = new MainWindow();
         Set(window, "_resultsPath", Path.Combine(output, "results.json"));
-        foreach (var item in window.Stages) item.InvalidateResult();
+        foreach (var item in window.Stages)
+        {
+            item.InvalidateResult();
+        }
+
         var stage = window.Stages.Single(item => item.Id == "Claude Code");
         stage.SetCheckResult("AVAILABLE", "2.1.299", "2.2.1");
         stage.Queue();
@@ -235,16 +266,21 @@ internal static class Program
         window.Stages[4].SetCheckResult("NOT_INSTALLED");
         window.Stages[9].SetCheckResult("DIRECT", "1.3.5");
         Check(window.Stages[9].VersionBrush == Brushes.LightSlateGray, "Uncompared version looks current");
-        foreach (var vendor in window.Vendors) Call(window, "RefreshVendorSummary", vendor);
+        foreach (var vendor in window.Vendors)
+        {
+            Call(window, "RefreshVendorSummary", vendor);
+        }
+
         var root = (FrameworkElement)window.Content;
         foreach (var (width, height) in new[] { (1072, 740), (932, 620) })
         {
-            root.Measure(new Size(width, height));
-            root.Arrange(new Rect(0, 0, width, height));
+            root.Measure(new(width, height));
+            root.Arrange(new(0, 0, width, height));
             root.UpdateLayout();
             var tabs = (FrameworkElement)window.FindName("LogTabs");
-            Check(tabs.TranslatePoint(new Point(0, tabs.ActualHeight), root).Y <= root.ActualHeight,
-                $"Journal extends below the window: {width}x{height}, bottom={tabs.TranslatePoint(new Point(0, tabs.ActualHeight), root).Y}, available={root.ActualHeight}");
+            Check(tabs.TranslatePoint(new(0, tabs.ActualHeight), root).Y <= root.ActualHeight,
+                $"Journal extends below the window: {width}x{height}, bottom={tabs.TranslatePoint(new(0, tabs.ActualHeight), root).Y}, available={root.ActualHeight}");
+
             Check(Descendants<Button>(root).Count(button => Equals(button.Content, "⋮")) == 10, "Missing visible card menus");
             Check(Descendants<Border>(root).Count(border => border.ContextMenu is not null) == 10, "Card context menus missing");
             var directChoices = Descendants<CheckBox>(root).Where(box => box.DataContext is UpdateStage { PackageStatus: PackageStatus.DirectUpdate }).ToArray();
@@ -253,9 +289,10 @@ internal static class Program
             Check(cards.Length == 10 && cards.Max(card => card.ActualWidth) - cards.Min(card => card.ActualWidth) < 1, "Vendor card grid widths differ");
             foreach (var row in Descendants<Button>(root).Where(button => Equals(button.Tag, "Stage")).GroupBy(button => ((UpdateStage)button.DataContext).Vendor))
             {
-                var positions = row.Select(button => Descendants<TextBlock>(button).First().TranslatePoint(new Point(0, 0), root).Y).ToArray();
+                var positions = row.Select(button => Descendants<TextBlock>(button).First().TranslatePoint(new(0, 0), root).Y).ToArray();
                 Check(positions.Max() - positions.Min() < 1, "Card titles are not aligned");
             }
+
             var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
             bitmap.Render(root);
             var encoder = new PngBitmapEncoder();
@@ -264,12 +301,13 @@ internal static class Program
             encoder.Save(file);
             var stopButton = (Button)window.FindName("StopButton");
             stopButton.Visibility = Visibility.Visible;
-            root.Measure(new Size(width, height));
-            root.Arrange(new Rect(0, 0, width, height));
+            root.Measure(new(width, height));
+            root.Arrange(new(0, 0, width, height));
             root.UpdateLayout();
-            Check(tabs.TranslatePoint(new Point(0, tabs.ActualHeight), root).Y <= root.ActualHeight, "Busy layout extends below the window");
+            Check(tabs.TranslatePoint(new(0, tabs.ActualHeight), root).Y <= root.ActualHeight, "Busy layout extends below the window");
             stopButton.Visibility = Visibility.Collapsed;
         }
+
         Check(((Button)window.FindName("StopButton")).Visibility == Visibility.Collapsed, "Idle stop button is visible");
         var fixture = Path.Combine(output, "fixture.ps1");
         var calls = Path.Combine(output, "calls.txt");
@@ -279,21 +317,26 @@ internal static class Program
         File.Delete(Path.Combine(output, "missing"));
         File.Delete(Path.Combine(output, "error-result"));
         File.WriteAllText(fixture, """
-            param($Vendor, $LogPath, $Action, $OnlyStage, [switch]$CheckOnly)
-            [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-            Add-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.txt') -Value "$Action|$OnlyStage|$CheckOnly"
-            Write-Output "[12:34:56] === $OnlyStage ==="
-            if (Test-Path (Join-Path $PSScriptRoot 'fail')) { exit 5 }
-            if (Test-Path (Join-Path $PSScriptRoot 'missing')) { exit 0 }
-            if (Test-Path (Join-Path $PSScriptRoot 'wait')) { Start-Sleep -Seconds 30 }
-            $result = if (Test-Path (Join-Path $PSScriptRoot 'error-result')) { 'ERROR' } else { 'CURRENT' }
-            $json = @{ Stage = $OnlyStage; Result = $result; Installed = '2.2.1'; Available = '2.2.1' } | ConvertTo-Json -Compress
-            Write-Output "[12:34:56] UI_RESULT $json"
-            Write-Output "[12:34:56] === COMPLETED: $OnlyStage ==="
-            """);
+                                   param($Vendor, $LogPath, $Action, $OnlyStage, [switch]$CheckOnly)
+                                   [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+                                   Add-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.txt') -Value "$Action|$OnlyStage|$CheckOnly"
+                                   Write-Output "[12:34:56] === $OnlyStage ==="
+                                   if (Test-Path (Join-Path $PSScriptRoot 'fail')) { exit 5 }
+                                   if (Test-Path (Join-Path $PSScriptRoot 'missing')) { exit 0 }
+                                   if (Test-Path (Join-Path $PSScriptRoot 'wait')) { Start-Sleep -Seconds 30 }
+                                   $result = if (Test-Path (Join-Path $PSScriptRoot 'error-result')) { 'ERROR' } else { 'CURRENT' }
+                                   $json = @{ Stage = $OnlyStage; Result = $result; Installed = '2.2.1'; Available = '2.2.1' } | ConvertTo-Json -Compress
+                                   Write-Output "[12:34:56] UI_RESULT $json"
+                                   Write-Output "[12:34:56] === COMPLETED: $OnlyStage ==="
+                                   """);
+
         Set(window, "_scriptPath", fixture);
         Set(window, "_logPath", Path.Combine(output, "main.log"));
-        foreach (var vendor in window.Vendors) Set(vendor, "<LogPath>k__BackingField", Path.Combine(output, vendor.Name + ".log"));
+        foreach (var vendor in window.Vendors)
+        {
+            Set(vendor, "<LogPath>k__BackingField", Path.Combine(output, vendor.Name + ".log"));
+        }
+
         var other = window.Stages.Single(item => item.Id == "Claude npm package");
         var untouched = window.Stages[0].InstalledVersion;
         stage.SetCheckResult("AVAILABLE", "2.1.299", "2.2.1");

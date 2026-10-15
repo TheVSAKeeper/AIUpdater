@@ -13,14 +13,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="tests\**\*.cs" />
     <Resource Include="Assets\AIUpdater.ico" />
     <Resource Include="Assets\AIUpdater.png" />
-    <None Update="Update-Codex.ps1" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="Check-Updates.ps1" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="Manage-Components.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Scripts\*.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="%(Filename)%(Extension)" />
   </ItemGroup>
-
-
 
 </Project>

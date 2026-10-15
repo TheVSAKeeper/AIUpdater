@@ -2,34 +2,11 @@
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
 
-namespace AIUpdater;
-
-public enum PackageStatus
-{
-    None = 0,
-    NotInstalled = 1,
-    UpToDate = 2,
-    UpdateAvailable = 3,
-    Unknown = 4,
-    DirectUpdate = 5,
-    CheckFailed = 6
-}
-
-public enum OperationState
-{
-    None = 0,
-    Queued = 1,
-    Checking = 2,
-    Installing = 3,
-    Updating = 4,
-    Uninstalling = 5,
-    Failed = 6,
-    Stopped = 7
-}
+namespace AIUpdater.Models;
 
 public sealed class UpdateStage : INotifyPropertyChanged
 {
-    private bool _isSelectedForUpdate;
+    public event PropertyChangedEventHandler? PropertyChanged;
     public required string Id { get; init; }
     public required string Name { get; init; }
     public required string Vendor { get; init; }
@@ -43,6 +20,7 @@ public sealed class UpdateStage : INotifyPropertyChanged
     public bool CanSelectForUpdate => HasUpdate || PackageStatus == PackageStatus.DirectUpdate;
     public bool CanUpdate => PackageStatus is PackageStatus.UpToDate or PackageStatus.UpdateAvailable or PackageStatus.Unknown or PackageStatus.DirectUpdate or PackageStatus.CheckFailed;
     public bool CanManageInstallation => !Id.EndsWith("plugins", StringComparison.Ordinal);
+
     public string? CheckResult => PackageStatus switch
     {
         PackageStatus.NotInstalled => "NOT_INSTALLED",
@@ -51,16 +29,20 @@ public sealed class UpdateStage : INotifyPropertyChanged
         PackageStatus.Unknown => "UNKNOWN",
         PackageStatus.DirectUpdate => "DIRECT",
         PackageStatus.CheckFailed => "ERROR",
-        _ => null
+        _ => null,
     };
 
     public bool IsSelectedForUpdate
     {
-        get => _isSelectedForUpdate;
+        get;
         set
         {
-            if (_isSelectedForUpdate == value) return;
-            _isSelectedForUpdate = value;
+            if (field == value)
+            {
+                return;
+            }
+
+            field = value;
             Notify();
         }
     }
@@ -72,16 +54,21 @@ public sealed class UpdateStage : INotifyPropertyChanged
             : $"v{InstalledVersion}";
 
     public string VersionPrefixText => HasUpdate && InstalledVersion is not null && AvailableVersion is not null
-        ? $"v{InstalledVersion} → " : VersionDisplayText;
+        ? $"v{InstalledVersion} → "
+        : VersionDisplayText;
+
     public string VersionTargetText => HasUpdate && InstalledVersion is not null && AvailableVersion is not null
-        ? $"v{AvailableVersion}" : "";
+        ? $"v{AvailableVersion}"
+        : "";
+
     public Brush VersionBrush => PackageStatus == PackageStatus.UpToDate ? Brushes.MediumAquamarine : Brushes.LightSlateGray;
     public Brush VersionTargetBrush => HasUpdate ? Brushes.Gold : VersionBrush;
     public string CardActionName => CanSelectForUpdate ? $"Выбрать обновление: {Name}" : $"Проверить: {Name}";
 
-    public string ResultDescription => CheckedAt is null ? "Проверка ещё не выполнялась"
+    public string ResultDescription => CheckedAt is null
+        ? "Проверка ещё не выполнялась"
         : $"Последняя проверка: {CheckedAt.Value.ToLocalTime():dd.MM.yyyy HH:mm}\n{VersionDisplayText}"
-            + (string.IsNullOrWhiteSpace(Info) || Info == VersionDisplayText ? "" : $"\n{Info}");
+          + (string.IsNullOrWhiteSpace(Info) || Info == VersionDisplayText ? "" : $"\n{Info}");
 
     public string Status => OperationState switch
     {
@@ -100,8 +87,8 @@ public sealed class UpdateStage : INotifyPropertyChanged
             PackageStatus.Unknown => "Не удалось сравнить",
             PackageStatus.DirectUpdate => "Обновляется напрямую",
             PackageStatus.CheckFailed => "Ошибка проверки",
-            _ => "Не проверено"
-        }
+            _ => "Не проверено",
+        },
     };
 
     public Brush StatusBrush => OperationState switch
@@ -114,9 +101,10 @@ public sealed class UpdateStage : INotifyPropertyChanged
             PackageStatus.UpdateAvailable => Brushes.Gold,
             PackageStatus.UpToDate => Brushes.MediumAquamarine,
             PackageStatus.CheckFailed => Brushes.LightCoral,
-            _ => Brushes.LightSlateGray
-        }
+            _ => Brushes.LightSlateGray,
+        },
     };
+
     public Brush IndicatorBrush => StatusBrush;
 
     public void Queue()
@@ -143,8 +131,12 @@ public sealed class UpdateStage : INotifyPropertyChanged
         Refresh();
     }
 
-    public void SetCheckResult(string result, string? installedVersion = null, string? availableVersion = null,
-        DateTimeOffset? checkedAt = null, string? info = null)
+    public void SetCheckResult(
+        string result,
+        string? installedVersion = null,
+        string? availableVersion = null,
+        DateTimeOffset? checkedAt = null,
+        string? info = null)
     {
         PackageStatus = result switch
         {
@@ -153,8 +145,9 @@ public sealed class UpdateStage : INotifyPropertyChanged
             "NOT_INSTALLED" => PackageStatus.NotInstalled,
             "DIRECT" => PackageStatus.DirectUpdate,
             "ERROR" => PackageStatus.CheckFailed,
-            _ => PackageStatus.Unknown
+            _ => PackageStatus.Unknown,
         };
+
         InstalledVersion = installedVersion;
         AvailableVersion = availableVersion;
         CheckedAt = checkedAt ?? DateTimeOffset.Now;
@@ -174,8 +167,13 @@ public sealed class UpdateStage : INotifyPropertyChanged
         Refresh();
     }
 
-    public event PropertyChangedEventHandler? PropertyChanged;
-    private void Notify([CallerMemberName] string? propertyName = null) =>
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-    private void Refresh() => Notify("");
+    private void Notify([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new(propertyName));
+    }
+
+    private void Refresh()
+    {
+        Notify("");
+    }
 }

@@ -6,5 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="../../AIUpdater.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/AIUpdater/AIUpdater.csproj" />
+  </ItemGroup>
 </Project>

@@ -1,10 +1,14 @@
-﻿using System.Diagnostics;
+﻿using AIUpdater.Infrastructure;
+using AIUpdater.Models;
+using AIUpdater.Services;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 
-namespace AIUpdater;
+namespace AIUpdater.Views;
 
 public partial class ChangelogWindow : Window
 {
@@ -17,16 +21,30 @@ public partial class ChangelogWindow : Window
         InitializeComponent();
         var items = stages.ToArray();
         ComponentList.ItemsSource = items;
-        Closed += (_, _) => { _loadCancellation?.Cancel(); _loadCancellation?.Dispose(); };
+        Closed += (_, _) =>
+        {
+            _loadCancellation?.Cancel();
+            _loadCancellation?.Dispose();
+        };
+
         ComponentList.SelectedItem = selected ?? items.FirstOrDefault();
+    }
+
+    public void SelectStage(UpdateStage stage)
+    {
+        ComponentList.SelectedItem = stage;
     }
 
     private async void ComponentList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (ComponentList.SelectedItem is not UpdateStage stage) return;
+        if (ComponentList.SelectedItem is not UpdateStage stage)
+        {
+            return;
+        }
+
         _loadCancellation?.Cancel();
         _loadCancellation?.Dispose();
-        var cancellation = _loadCancellation = new CancellationTokenSource();
+        var cancellation = _loadCancellation = new();
         var source = _source = ChangelogService.ForStage(stage.Id);
         SourceNoteText.Text = source.Note;
         SourceButton.IsEnabled = source.PageUrl is not null;
@@ -37,7 +55,11 @@ public partial class ChangelogWindow : Window
         try
         {
             var text = await ChangelogService.LoadAsync(source, cancellation.Token);
-            if (cancellation.IsCancellationRequested) return;
+            if (cancellation.IsCancellationRequested)
+            {
+                return;
+            }
+
             ChangelogTextBox.Text = text;
             ChangelogTextBox.ScrollToHome();
             LoadStatusText.Text = source.Format == "agy" ? "История из установленного agy"
@@ -45,11 +67,18 @@ public partial class ChangelogWindow : Window
         }
         catch (OperationCanceledException)
         {
-            if (!cancellation.IsCancellationRequested) LoadStatusText.Text = "Источник не ответил вовремя. Можно открыть его в браузере.";
+            if (!cancellation.IsCancellationRequested)
+            {
+                LoadStatusText.Text = "Источник не ответил вовремя. Можно открыть его в браузере.";
+            }
         }
-        catch (Exception exception) when (exception is HttpRequestException or InvalidDataException or System.Text.Json.JsonException)
+        catch (Exception exception) when (exception is HttpRequestException or InvalidDataException or JsonException)
         {
-            if (cancellation.IsCancellationRequested) return;
+            if (cancellation.IsCancellationRequested)
+            {
+                return;
+            }
+
             LoadStatusText.Text = "Не удалось загрузить изменения. Можно открыть официальный источник.";
             ChangelogTextBox.Text = exception.Message;
         }
@@ -57,12 +86,17 @@ public partial class ChangelogWindow : Window
 
     private void SourceButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_source?.PageUrl is not { } url) return;
+        if (_source?.PageUrl is not { } url)
+        {
+            return;
+        }
+
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
         catch (Exception exception) { AppDialog.Show(this, exception.Message, "Не удалось открыть источник"); }
     }
 
-    public void SelectStage(UpdateStage stage) => ComponentList.SelectedItem = stage;
-
-    private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+    private void CloseButton_Click(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
 }
