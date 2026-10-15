@@ -171,6 +171,37 @@ function Test-CliUpdate
     Compare-CheckVersions $Stage $installed $available
 }
 
+function Get-AgyLatestVersion
+{
+    $architecture = if ($env:PROCESSOR_ARCHITEW6432)
+    {
+        $env:PROCESSOR_ARCHITEW6432
+    }
+    else
+    {
+        $env:PROCESSOR_ARCHITECTURE
+    }
+    $platform = switch ($architecture)
+    {
+        'AMD64' { 'windows_amd64' }
+        'ARM64' { 'windows_arm64' }
+        default { throw "Unsupported architecture for agy update check: $architecture" }
+    }
+    $response = Invoke-WebRequest -Uri "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/$platform.json" -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+    $content = [string]$response.Content
+    if (-not $content.TrimStart().StartsWith('{'))
+    {
+        throw 'Expected an agy release manifest object'
+    }
+    $manifest = $content | ConvertFrom-Json -ErrorAction Stop
+    if ($manifest -isnot [pscustomobject] -or $manifest.version -isnot [string] -or
+        $manifest.version -cnotmatch '\A[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\z')
+    {
+        throw 'Invalid agy release manifest version'
+    }
+    return $manifest.version
+}
+
 function Test-PluginsUpdate
 {
     param([string]$Stage, [string]$Tool)
@@ -277,10 +308,17 @@ function Invoke-CheckStage
             if ($null -eq $installed)
             {
                 Write-CheckResult $Stage 'ERROR' "Could not parse agy version: $( $result.Text )" -Info 'agy запущен, но его версию не удалось разобрать'
+                return
             }
-            else
+            try
             {
-                Write-CheckResult $Stage 'DIRECT' "Installed agy: $( $result.Text ). Latest version is checked by its updater" $installed -Info 'Новая версия определяется при запуске обновления'
+                $available = Get-AgyLatestVersion
+                Compare-CheckVersions $Stage $installed $available
+            }
+            catch
+            {
+                Write-CheckResult $Stage 'ERROR' "Latest agy version query failed: $( $_.Exception.Message )" $installed -Info 'Не удалось получить доступную версию agy из манифеста'
+                return
             }
         }
         default {

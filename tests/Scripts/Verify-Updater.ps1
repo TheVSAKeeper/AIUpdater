@@ -185,6 +185,16 @@ function Invoke-CommandCapture
     throw "Check-only mode attempted an unexpected command: $FilePath $( $Arguments -join ' ' )"
 }
 
+function Invoke-WebRequest
+{
+    param($Uri, [switch]$UseBasicParsing, $TimeoutSec, $ErrorAction)
+    if ($Uri -notmatch '^https://antigravity-cli-auto-updater-974169037036\.us-central1\.run\.app/manifests/windows_(amd64|arm64)\.json$' -or $TimeoutSec -ne 20)
+    {
+        throw "Unexpected update check request: $Uri"
+    }
+    return [pscustomobject]@{ Content = '{"version":"2.0.0"}' }
+}
+
 # Exercise the actual dispatcher, including the branch that normally starts applications.
 $CheckOnly = $true
 $Action = 'Update'
@@ -202,11 +212,11 @@ if ($checkResults.Count -ne 10)
 {
     throw "Expected ten check results; received $( $checkResults.Count )"
 }
-if (@($checkResults | Where-Object { $_ -match 'CHECK AVAILABLE' }).Count -ne 7)
+if (@($checkResults | Where-Object { $_ -match 'CHECK AVAILABLE' }).Count -ne 8)
 {
     throw 'Available versions were not detected'
 }
-if (@($checkResults | Where-Object { $_ -match 'CHECK DIRECT' }).Count -ne 3)
+if (@($checkResults | Where-Object { $_ -match 'CHECK DIRECT' }).Count -ne 2)
 {
     throw 'Unsupported comparisons were not marked as direct updates'
 }
@@ -227,6 +237,11 @@ $cliResult = $uiResults | Where-Object Stage -EQ 'Claude Code'
 if ($cliResult.Result -ne 'AVAILABLE' -or $cliResult.Installed -ne '1.0.0' -or $cliResult.Available -ne '2.0.0')
 {
     throw 'Structured result lost CLI versions'
+}
+$agyResult = $uiResults | Where-Object Stage -EQ 'Antigravity CLI'
+if ($agyResult.Result -ne 'AVAILABLE' -or $agyResult.Installed -ne '1.0.0' -or $agyResult.Available -ne '2.0.0')
+{
+    throw 'Structured result lost agy manifest versions'
 }
 if (($uiResults | Where-Object Stage -EQ 'Codex plugins').Info -ne 'Плагинов: 2' -or
     ($uiResults | Where-Object Stage -EQ 'Claude plugins').Info -ne 'Плагинов: 1')
