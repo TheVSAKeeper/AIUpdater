@@ -28,7 +28,13 @@ public static class ChangelogService
             "Antigravity CLI" => new(null, null, "agy", "Источник: команда agy changelog. История встроена в установленный CLI и может не включать более новые опубликованные версии."),
             "Codex plugins" => new("https://developers.openai.com/codex/changelog/", null, "none", "У каждого плагина своя история изменений в его репозитории или каталоге. Общего changelog установленных плагинов нет. Кнопка источника открывает общие изменения Codex."),
             "Claude plugins" => new("https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md", null, "none", "У каждого плагина своя история изменений в его репозитории или каталоге. Общего changelog установленных плагинов нет. Кнопка источника открывает изменения Claude Code."),
-            _ => new(null, null, "none", "Подтверждённый публичный changelog для Antigravity CLI (agy) пока не указан. История Desktop не подменяет историю CLI."),
+            "Windows Terminal" => new("https://github.com/microsoft/terminal/releases", "https://api.github.com/repos/microsoft/terminal/releases/latest", "github", "Последний выпуск Windows Terminal; доступность в Store может отличаться."),
+            "PowerShell 7" => new("https://github.com/PowerShell/PowerShell/releases", "https://api.github.com/repos/PowerShell/PowerShell/releases/latest", "github", "Последний стабильный выпуск PowerShell."),
+            "Docker Desktop" => new("https://docs.docker.com/desktop/release-notes/", "https://docs.docker.com/desktop/release-notes/", "html", "История Docker Desktop."),
+            ".NET SDK 10" => new("https://github.com/dotnet/core/tree/main/release-notes/10.0", null, "none", "История .NET 10 доступна по кнопке источника."),
+            "Git" => new("https://github.com/git-for-windows/git/releases", "https://api.github.com/repos/git-for-windows/git/releases/latest", "github", "История Git for Windows."),
+            "Node.js LTS" => new("https://nodejs.org/en/about/previous-releases", null, "none", "Выпуски Node.js и сроки поддержки доступны по кнопке источника."),
+            _ => new(null, null, "none", "Источник истории изменений для этого компонента не указан."),
         };
     }
 

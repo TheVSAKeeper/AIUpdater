@@ -7,7 +7,7 @@ $projectRoot = Split-Path $PSScriptRoot -Parent
 & (Join-Path $PSScriptRoot 'release-info.ps1') | Out-Null
 & dotnet build (Join-Path $projectRoot 'AIUpdater.slnx') -c $Configuration --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Ошибка сборки решения' }
-foreach ($scriptName in @('Verify-Updater.ps1', 'Verify-PackageChecks.ps1'))
+foreach ($scriptName in @('Verify-Updater.ps1', 'Verify-PackageChecks.ps1', 'Verify-DevelopmentTools.ps1', 'Verify-DevelopmentMigration.ps1', 'Verify-DotNetSdk.ps1'))
 {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $projectRoot "tests\Scripts\$scriptName")
     if ($LASTEXITCODE -ne 0) { throw "Не пройдена проверка $scriptName" }

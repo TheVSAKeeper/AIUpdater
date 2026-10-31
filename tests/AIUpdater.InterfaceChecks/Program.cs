@@ -281,13 +281,13 @@ file static class Program
             Check(tabs.TranslatePoint(new(0, tabs.ActualHeight), root).Y <= root.ActualHeight,
                 $"Journal extends below the window: {width}x{height}, bottom={tabs.TranslatePoint(new(0, tabs.ActualHeight), root).Y}, available={root.ActualHeight}");
 
-            Check(Descendants<Button>(root).Count(button => Equals(button.Content, "⋮")) == 10, "Missing visible card menus");
-            Check(Descendants<Border>(root).Count(border => border.ContextMenu is not null) == 10, "Card context menus missing");
+            Check(Descendants<Button>(root).Count(button => Equals(button.Content, "⋮")) == window.Stages.Count, "Missing visible card menus");
+            Check(Descendants<Border>(root).Count(border => border.ContextMenu is not null) == window.Stages.Count, "Card context menus missing");
             var directChoices = Descendants<CheckBox>(root).Where(box => box.DataContext is UpdateStage { PackageStatus: PackageStatus.DirectUpdate }).ToArray();
             Check(directChoices.Length == 2 && directChoices.All(box => box.Visibility == Visibility.Visible && box.IsChecked == false), "Direct-update checkboxes are hidden or checked by default");
             var cards = Descendants<Border>(root).Where(border => border.ContextMenu is not null).ToArray();
-            Check(cards.Length == 10 && cards.Max(card => card.ActualWidth) - cards.Min(card => card.ActualWidth) < 1, "Vendor card grid widths differ");
-            foreach (var row in Descendants<Button>(root).Where(button => Equals(button.Tag, "Stage")).GroupBy(button => ((UpdateStage)button.DataContext).Vendor))
+            Check(cards.Length == 16 && cards.Max(card => card.ActualWidth) - cards.Min(card => card.ActualWidth) < 1, "Vendor card grid widths differ");
+            foreach (var row in Descendants<Button>(root).Where(button => Equals(button.Tag, "Stage")).GroupBy(button => Math.Round(button.TranslatePoint(new(0, 0), root).Y)))
             {
                 var positions = row.Select(button => Descendants<TextBlock>(button).First().TranslatePoint(new(0, 0), root).Y).ToArray();
                 Check(positions.Max() - positions.Min() < 1, "Card titles are not aligned");
@@ -345,6 +345,12 @@ file static class Program
         Check(File.ReadAllLines(calls).SequenceEqual(new[] { "Update|Claude Code|False", "Update|Claude npm package|False" }), "Bulk update dispatched unselected stages or changed mode");
         Check(stage.Status == "Актуально" && other.Status == "Актуально", "Post-update results missing");
         Check(window.Stages[0].InstalledVersion == untouched, "Selected update reset another vendor");
+        File.WriteAllText(calls, "");
+        var terminal = window.Stages.Single(item => item.Id == "Windows Terminal");
+        terminal.SetCheckResult("AVAILABLE", "1.0.0", "2.2.1");
+        Await((Task)Call(window, "RunUpdaterAsync", terminal, "Update", false, null!)!);
+        Check(File.ReadAllLines(calls).SequenceEqual(new[] { "Update|Windows Terminal|False" }) && terminal.Status == "Актуально", "Development component dispatch failed");
+        Check(window.Stages[0].InstalledVersion == untouched, "Development update reset an AI component");
         File.WriteAllText(calls, "");
         stage.SetCheckResult("AVAILABLE", "2.1.299", "2.2.1");
         var selectedPlugin = window.Stages[7];

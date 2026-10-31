@@ -19,7 +19,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="2*" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -102,164 +102,166 @@
                 </StackPanel>
             </Grid>
         </Border>
-        <ItemsControl x:Name="StageItemsControl"
-                      Grid.Row="2"
-                      ItemsSource="{Binding Vendors}"
-                      Margin="0,0,0,6">
-            <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                    <Border Background="{StaticResource SurfaceBrush}"
-                            BorderBrush="{StaticResource BorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="12"
-                            Padding="14,6"
-                            Margin="0,0,0,8">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="155" /><ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center"
-                                        Margin="0,0,12,0">
-                                <TextBlock Text="{Binding Name}"
-                                           FontSize="16"
-                                           FontWeight="SemiBold"
-                                           ToolTip="{Binding Detail}" />
-                                <TextBlock Text="{Binding Status}"
-                                           Foreground="{Binding StatusBrush}"
-                                           Margin="0,3,0,0"
-                                           FontSize="11" />
-                            </StackPanel>
-                            <ItemsControl Grid.Column="1"
-                                          ItemsSource="{Binding Stages}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <UniformGrid Columns="4" />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border Background="#182A21"
-                                                CornerRadius="9"
-                                                Margin="6,0,0,0"
-                                                BorderThickness="1"
-                                                Padding="6">
-                                            <Border.ContextMenu>
-                                                <ContextMenu
-                                                    DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                                    <MenuItem Header="Проверить"
-                                                              Click="CheckComponent_Click" />
-                                                    <MenuItem Header="Обновить"
-                                                              Click="UpdateComponent_Click"
-                                                              IsEnabled="{Binding CanUpdate}" />
-                                                    <MenuItem Header="Установить"
-                                                              Tag="Install"
-                                                              Click="ComponentAction_Click"
-                                                              IsEnabled="{Binding CanManageInstallation}" />
-                                                    <MenuItem Header="Удалить"
-                                                              Tag="Uninstall"
-                                                              Click="ComponentAction_Click"
-                                                              IsEnabled="{Binding CanManageInstallation}" />
-                                                    <Separator />
-                                                    <MenuItem Header="Что нового"
-                                                              Click="ChangelogMenuItem_Click" />
-                                                </ContextMenu>
-                                            </Border.ContextMenu>
-                                            <Border.Style>
-                                                <Style TargetType="Border">
-                                                    <Setter Property="BorderBrush"
-                                                            Value="{StaticResource BorderBrush}" />
-                                                    <Style.Triggers>
-                                                        <Trigger Property="IsMouseOver"
-                                                                 Value="True">
-                                                            <Setter Property="BorderBrush"
-                                                                    Value="{StaticResource AccentTextBrush}" />
-                                                        </Trigger>
-                                                        <DataTrigger Binding="{Binding PackageStatus}"
-                                                                     Value="NotInstalled">
-                                                            <Setter Property="Opacity"
-                                                                    Value="0.7" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Border.Style>
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <CheckBox VerticalAlignment="Center"
-                                                          Margin="0,0,3,0"
-                                                          MinWidth="28"
-                                                          MinHeight="36"
-                                                          Padding="6"
-                                                          IsChecked="{Binding IsSelectedForUpdate}"
-                                                          Visibility="{Binding CanSelectForUpdate, Converter={StaticResource BoolVisibility}}"
-                                                          ToolTip="Выбрать для обновления"
-                                                          AutomationProperties.Name="{Binding Name, StringFormat=Выбрать для обновления: {0}}" />
-                                                <Button Grid.Column="1"
-                                                        Tag="Stage"
-                                                        Click="StageButton_Click"
-                                                        HorizontalContentAlignment="Stretch"
-                                                        Padding="2"
-                                                        MinHeight="52"
-                                                        Background="Transparent"
-                                                        BorderThickness="0"
-                                                        ToolTip="{Binding ResultDescription}"
-                                                        VerticalContentAlignment="Top"
-                                                        AutomationProperties.Name="{Binding CardActionName}">
-                                                    <StackPanel VerticalAlignment="Top">
-                                                        <TextBlock Text="{Binding Name}"
-                                                                   FontSize="12"
-                                                                   FontWeight="SemiBold"
-                                                                   TextTrimming="CharacterEllipsis"
-                                                                   ToolTip="{Binding Name}" />
-                                                        <Grid Margin="0,4,0,0">
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="11" />
-                                                                <ColumnDefinition Width="*" />
-                                                            </Grid.ColumnDefinitions>
-                                                            <Ellipse Width="6"
-                                                                     Height="6"
-                                                                     Fill="{Binding IndicatorBrush}"
-                                                                     Margin="0,0,5,0" />
-                                                            <TextBlock Grid.Column="1"
-                                                                       Text="{Binding Status}"
-                                                                       Foreground="{Binding StatusBrush}"
-                                                                       FontSize="11"
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl x:Name="StageItemsControl"
+                          Grid.Row="2"
+                          ItemsSource="{Binding Vendors}"
+                          Margin="0,0,0,6">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{StaticResource SurfaceBrush}"
+                                BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="14,6"
+                                Margin="0,0,0,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="155" /><ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center"
+                                            Margin="0,0,12,0">
+                                    <TextBlock Text="{Binding Name}"
+                                               FontSize="16"
+                                               FontWeight="SemiBold"
+                                               ToolTip="{Binding Detail}" />
+                                    <TextBlock Text="{Binding Status}"
+                                               Foreground="{Binding StatusBrush}"
+                                               Margin="0,3,0,0"
+                                               FontSize="11" />
+                                </StackPanel>
+                                <ItemsControl Grid.Column="1"
+                                              ItemsSource="{Binding Stages}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <UniformGrid Columns="4" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="#182A21"
+                                                    CornerRadius="9"
+                                                    Margin="6,0,0,0"
+                                                    BorderThickness="1"
+                                                    Padding="6">
+                                                <Border.ContextMenu>
+                                                    <ContextMenu
+                                                        DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                        <MenuItem Header="Проверить"
+                                                                  Click="CheckComponent_Click" />
+                                                        <MenuItem Header="Обновить"
+                                                                  Click="UpdateComponent_Click"
+                                                                  IsEnabled="{Binding CanUpdate}" />
+                                                        <MenuItem Header="Установить"
+                                                                  Tag="Install"
+                                                                  Click="ComponentAction_Click"
+                                                                  IsEnabled="{Binding CanManageInstallation}" />
+                                                        <MenuItem Header="Удалить"
+                                                                  Tag="Uninstall"
+                                                                  Click="ComponentAction_Click"
+                                                                  IsEnabled="{Binding CanManageInstallation}" />
+                                                        <Separator />
+                                                        <MenuItem Header="Что нового"
+                                                                  Click="ChangelogMenuItem_Click" />
+                                                    </ContextMenu>
+                                                </Border.ContextMenu>
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="BorderBrush"
+                                                                Value="{StaticResource BorderBrush}" />
+                                                        <Style.Triggers>
+                                                            <Trigger Property="IsMouseOver"
+                                                                     Value="True">
+                                                                <Setter Property="BorderBrush"
+                                                                        Value="{StaticResource AccentTextBrush}" />
+                                                            </Trigger>
+                                                            <DataTrigger Binding="{Binding PackageStatus}"
+                                                                         Value="NotInstalled">
+                                                                <Setter Property="Opacity"
+                                                                        Value="0.7" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <CheckBox VerticalAlignment="Center"
+                                                              Margin="0,0,3,0"
+                                                              MinWidth="28"
+                                                              MinHeight="36"
+                                                              Padding="6"
+                                                              IsChecked="{Binding IsSelectedForUpdate}"
+                                                              Visibility="{Binding CanSelectForUpdate, Converter={StaticResource BoolVisibility}}"
+                                                              ToolTip="Выбрать для обновления"
+                                                              AutomationProperties.Name="{Binding Name, StringFormat=Выбрать для обновления: {0}}" />
+                                                    <Button Grid.Column="1"
+                                                            Tag="Stage"
+                                                            Click="StageButton_Click"
+                                                            HorizontalContentAlignment="Stretch"
+                                                            Padding="2"
+                                                            MinHeight="52"
+                                                            Background="Transparent"
+                                                            BorderThickness="0"
+                                                            ToolTip="{Binding ResultDescription}"
+                                                            VerticalContentAlignment="Top"
+                                                            AutomationProperties.Name="{Binding CardActionName}">
+                                                        <StackPanel VerticalAlignment="Top">
+                                                            <TextBlock Text="{Binding Name}"
+                                                                       FontSize="12"
+                                                                       FontWeight="SemiBold"
                                                                        TextTrimming="CharacterEllipsis"
-                                                                       ToolTip="{Binding Status}" />
-                                                        </Grid>
-                                                        <TextBlock FontSize="11"
-                                                                   Margin="0,3,0,0"
-                                                                   TextWrapping="Wrap">
-                                                            <Run Text="{Binding VersionPrefixText, Mode=OneWay}"
-                                                                 Foreground="{Binding VersionBrush}" />
-                                                            <Run Text="{Binding VersionTargetText, Mode=OneWay}"
-                                                                 Foreground="{Binding VersionTargetBrush}" />
-                                                        </TextBlock>
-                                                    </StackPanel>
-                                                </Button>
-                                                <Button Grid.Column="2"
-                                                        Content="⋮"
-                                                        MinHeight="26"
-                                                        Width="22"
-                                                        Padding="0"
-                                                        VerticalAlignment="Top"
-                                                        Background="Transparent"
-                                                        BorderThickness="0"
-                                                        Click="CardMenuButton_Click"
-                                                        ToolTip="Действия с инструментом"
-                                                        AutomationProperties.Name="{Binding Name, StringFormat=Действия: {0}}" />
-                                            </Grid>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </Grid>
-                    </Border>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
+                                                                       ToolTip="{Binding Name}" />
+                                                            <Grid Margin="0,4,0,0">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="11" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <Ellipse Width="6"
+                                                                         Height="6"
+                                                                         Fill="{Binding IndicatorBrush}"
+                                                                         Margin="0,0,5,0" />
+                                                                <TextBlock Grid.Column="1"
+                                                                           Text="{Binding Status}"
+                                                                           Foreground="{Binding StatusBrush}"
+                                                                           FontSize="11"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           ToolTip="{Binding Status}" />
+                                                            </Grid>
+                                                            <TextBlock FontSize="11"
+                                                                       Margin="0,3,0,0"
+                                                                       TextWrapping="Wrap">
+                                                                <Run Text="{Binding VersionPrefixText, Mode=OneWay}"
+                                                                     Foreground="{Binding VersionBrush}" />
+                                                                <Run Text="{Binding VersionTargetText, Mode=OneWay}"
+                                                                     Foreground="{Binding VersionTargetBrush}" />
+                                                            </TextBlock>
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Button Grid.Column="2"
+                                                            Content="⋮"
+                                                            MinHeight="26"
+                                                            Width="22"
+                                                            Padding="0"
+                                                            VerticalAlignment="Top"
+                                                            Background="Transparent"
+                                                            BorderThickness="0"
+                                                            Click="CardMenuButton_Click"
+                                                            ToolTip="Действия с инструментом"
+                                                            AutomationProperties.Name="{Binding Name, StringFormat=Действия: {0}}" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
         <Grid Grid.Row="3"
               MinHeight="140">
             <Grid.RowDefinitions>

@@ -81,6 +81,12 @@ public partial class MainWindow
         new() { Id = "Claude plugins", Vendor = "Anthropic", Name = "Claude плагины" },
         new() { Id = "Antigravity Desktop", Vendor = "Google", Name = "Antigravity Desktop" },
         new() { Id = "Antigravity CLI", Vendor = "Google", Name = "Antigravity CLI (agy)" },
+        new() { Id = "Windows Terminal", Vendor = "Разработка", Name = "Windows Terminal" },
+        new() { Id = "PowerShell 7", Vendor = "Разработка", Name = "PowerShell 7" },
+        new() { Id = "Docker Desktop", Vendor = "Разработка", Name = "Docker Desktop" },
+        new() { Id = ".NET SDK 10", Vendor = "Разработка", Name = ".NET SDK 10" },
+        new() { Id = "Git", Vendor = "Разработка", Name = "Git" },
+        new() { Id = "Node.js LTS", Vendor = "Разработка", Name = "Node.js" },
     ];
 
     private string OperationName => _action switch

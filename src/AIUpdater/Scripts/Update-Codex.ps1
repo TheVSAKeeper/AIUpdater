@@ -9,10 +9,16 @@
         'Claude npm package',
         'Claude plugins',
         'Antigravity Desktop',
-        'Antigravity CLI'
+        'Antigravity CLI',
+        'Windows Terminal',
+        'PowerShell 7',
+        'Docker Desktop',
+        '.NET SDK 10',
+        'Git',
+        'Node.js LTS'
     )]
     [string]$OnlyStage,
-    [ValidateSet('OpenAI', 'Anthropic', 'Google')]
+    [ValidateSet('OpenAI', 'Anthropic', 'Google', 'Разработка')]
     [string]$Vendor,
     [switch]$CheckOnly,
     [ValidateSet('Update', 'Install', 'Uninstall')]
@@ -1840,6 +1846,12 @@ try
         'Antigravity CLI' = { Update-AntigravityCli }
     }
 
+    $developmentPackages = Get-DevelopmentPackages
+    foreach ($stage in $developmentPackages.Keys)
+    {
+        $steps[$stage] = { Update-DevelopmentTool $step.Key }
+    }
+
     foreach ($step in $steps.GetEnumerator())
     {
         $stepVendor = if ($step.Key -match 'Codex')
@@ -1849,6 +1861,10 @@ try
         elseif ($step.Key -match 'Claude')
         {
             'Anthropic'
+        }
+        elseif ($developmentPackages.Contains($step.Key))
+        {
+            'Разработка'
         }
         else
         {

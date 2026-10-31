@@ -13,6 +13,7 @@ foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.A
     Invoke-Expression $function.Extent.Text
 }
 . (Join-Path $scriptsDirectory 'Check-Updates.ps1')
+. (Join-Path $scriptsDirectory 'Manage-Components.ps1')
 $script:messages = [System.Collections.Generic.List[string]]::new()
 $script:hasNpm = $true
 $script:agyExists = $true

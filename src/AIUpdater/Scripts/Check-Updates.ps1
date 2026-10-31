@@ -50,7 +50,7 @@ function Test-WingetUpdate
     param([string]$Stage, [string]$PackageId, [string]$Source)
     if (-not (Test-Tool 'winget'))
     {
-        Write-CheckResult $Stage 'UNKNOWN' 'winget is unavailable; versions could not be compared'
+        Write-CheckResult $Stage 'ERROR' 'winget is unavailable; versions could not be compared' -Info 'winget недоступен'
         return
     }
     $result = Invoke-CommandCapture -FilePath 'winget' -Arguments @(
@@ -77,13 +77,18 @@ function Test-WingetUpdate
             }
             else
             {
+                if ($Source -eq 'msstore')
+                {
+                    Write-CheckResult $Stage 'UNKNOWN' 'Microsoft Store did not expose an available version in winget list' $installed -Info 'winget list не подтвердил доступную версию Microsoft Store'
+                    return
+                }
                 $installed
             }
             Compare-CheckVersions $Stage $installed $available
             return
         }
     }
-    Write-CheckResult $Stage 'UNKNOWN' "Could not parse winget version information: $( $result.Text )"
+    Write-CheckResult $Stage 'ERROR' "Could not parse winget version information: $( $result.Text )" -Info 'Не удалось прочитать версии из ответа winget'
 }
 
 function Test-CodexDesktopUpdate
@@ -246,6 +251,60 @@ function Test-PluginsUpdate
 function Invoke-CheckStage
 {
     param([string]$Stage)
+    $package = (Get-DevelopmentPackages)[$Stage]
+    if ($package)
+    {
+        $installed = $null
+        try
+        {
+            if ($Stage -eq 'PowerShell 7') { $installed = Get-ToolVersion 'pwsh' }
+            $owner = Get-DevelopmentToolOwner $Stage
+            if ($owner -eq 'missing')
+            {
+                Write-CheckResult $Stage 'NOT_INSTALLED' "$Stage is not installed"
+                return
+            }
+            if ($owner -eq 'nvm')
+            {
+                $installed = Get-ToolVersion 'node'
+                if ($null -eq $installed) { throw 'Could not read the active Node version' }
+                try
+                {
+                    $available = Get-NodeLatestVersion $installed
+                }
+                catch
+                {
+                    Write-CheckResult $Stage 'ERROR' $_.Exception.Message $installed -Info $_.Exception.Message
+                    return
+                }
+                Compare-CheckVersions $Stage $installed $available
+                return
+            }
+            if ($Stage -eq '.NET SDK 10')
+            {
+                $sdks = @(Get-DevelopmentSdkVersions)
+                if (-not $sdks.Count)
+                {
+                    Write-CheckResult $Stage 'NOT_INSTALLED' '.NET SDK 10 is not installed'
+                    return
+                }
+                $installed = $sdks | Sort-Object { [version]$_ } -Descending | Select-Object -First 1
+                $plan = @(Get-DevelopmentSdkPlan $sdks)
+                $updates = @($plan | Where-Object Update)
+                $detail = ($plan | ForEach-Object { "$($_.Installed) -> $($_.Available)" }) -join '; '
+                $status = if ($updates.Count) { 'AVAILABLE' } else { 'CURRENT' }
+                Write-CheckResult $Stage $status "SDK feature bands: $detail" ($plan.Installed -join '; ') ($plan.Available -join '; ') -Info $detail
+                return
+            }
+            $package = Get-DevelopmentPackage $Stage
+            Test-WingetUpdate $Stage $package[0] $package[1]
+        }
+        catch
+        {
+            Write-CheckResult $Stage 'ERROR' $_.Exception.Message $installed -Info $_.Exception.Message
+        }
+        return
+    }
     switch ($Stage)
     {
         'Codex desktop' {

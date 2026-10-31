@@ -107,6 +107,7 @@ if (-not ($script:messages -contains '=== COMPLETED: Claude Code ==='))
 Write-Output 'PASS: missing project skip, valid plugin update, winget outcomes, independent stage results'
 
 . (Join-Path $scriptsDirectory 'Check-Updates.ps1')
+. (Join-Path $scriptsDirectory 'Manage-Components.ps1')
 $script:commands.Clear()
 $script:messages.Clear()
 function Invoke-LoggedCommand
@@ -143,12 +144,18 @@ function Get-CodexPackagedStoreUpdateState
 $script:testScriptPath = $PSCommandPath
 function Get-Command
 {
-    param($Name, $ErrorAction) return [pscustomobject]@{ Source = $script:testScriptPath }
+    param($Name, $ErrorAction)
+    if ($Name -eq 'node') { return [pscustomobject]@{ Source = 'C:\Program Files\nodejs\node.exe' } }
+    return [pscustomobject]@{ Source = $script:testScriptPath }
 }
 function Invoke-CommandCapture
 {
     param($FilePath, $Arguments, $WorkingDirectory, [switch]$NoLogCommand)
     $script:commands.Add("$FilePath $( $Arguments -join ' ' )")
+    if ($FilePath -eq 'dotnet' -and $Arguments[0] -eq '--list-sdks')
+    {
+        return [pscustomobject]@{ ExitCode = 0; Text = '10.0.303 [C:\Program Files\dotnet\sdk]' }
+    }
     if ($Arguments[0] -eq '--version')
     {
         return [pscustomobject]@{ ExitCode = 0; Text = '1.0.0' }
@@ -164,7 +171,8 @@ function Invoke-CommandCapture
     if ($FilePath -eq 'winget' -and $Arguments[0] -eq 'list')
     {
         $packageId = $Arguments[2]
-        return [pscustomobject]@{ ExitCode = 0; Text = "Application $packageId 1.0.0 2.0.0 winget" }
+        $source = $Arguments[[array]::IndexOf($Arguments, '--source') + 1]
+        return [pscustomobject]@{ ExitCode = 0; Text = "Application $packageId 1.0.0 2.0.0 $source" }
     }
     if ($Arguments[0] -eq 'plugin' -and $Arguments[1] -eq 'list')
     {
@@ -188,6 +196,10 @@ function Invoke-CommandCapture
 function Invoke-WebRequest
 {
     param($Uri, [switch]$UseBasicParsing, $TimeoutSec, $ErrorAction)
+    if ($Uri -eq 'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json')
+    {
+        return [pscustomobject]@{ Content = (@{ 'channel-version'='10.0'; releases=@(@{ sdk=@{ version='10.0.304'; files=@(@{name='dotnet-sdk-win-x64.exe';rid='win-x64';url='https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.304/dotnet-sdk-10.0.304-win-x64.exe';hash=('a' * 128)}) } }) } | ConvertTo-Json -Depth 8 -Compress) }
+    }
     if ($Uri -notmatch '^https://antigravity-cli-auto-updater-974169037036\.us-central1\.run\.app/manifests/windows_(amd64|arm64)\.json$' -or $TimeoutSec -ne 20)
     {
         throw "Unexpected update check request: $Uri"
@@ -208,11 +220,11 @@ $manageScriptPath = Join-Path $scriptsDirectory 'Manage-Components.ps1'
 $dispatchText = $dispatch.Extent.Text.Replace(". (Join-Path `$PSScriptRoot 'Check-Updates.ps1')", '. $checkScriptPath').Replace(". (Join-Path `$PSScriptRoot 'Manage-Components.ps1')", '. $manageScriptPath').Replace('exit 1', 'throw ($script:messages -join "`n")')
 Invoke-Expression $dispatchText
 $checkResults = @($script:messages | Where-Object { $_ -match '^=== CHECK ' })
-if ($checkResults.Count -ne 10)
+if ($checkResults.Count -ne 16)
 {
-    throw "Expected ten check results; received $( $checkResults.Count )"
+    throw "Expected sixteen check results; received $( $checkResults.Count )"
 }
-if (@($checkResults | Where-Object { $_ -match 'CHECK AVAILABLE' }).Count -ne 8)
+if (@($checkResults | Where-Object { $_ -match 'CHECK AVAILABLE' }).Count -ne 14)
 {
     throw 'Available versions were not detected'
 }
@@ -229,7 +241,7 @@ if ($script:HadFailure)
     throw 'Check-only dispatcher failed'
 }
 $uiResults = @($script:messages | Where-Object { $_ -like 'UI_RESULT *' } | ForEach-Object { $_.Substring(10) | ConvertFrom-Json })
-if ($uiResults.Count -ne 10)
+if ($uiResults.Count -ne 16)
 {
     throw 'Missing structured results for check-only stages'
 }
@@ -248,6 +260,15 @@ if (($uiResults | Where-Object Stage -EQ 'Codex plugins').Info -ne 'Плагин
 {
     throw 'Incorrect plugin counts'
 }
+$script:messages.Clear()
+$Vendor = 'Разработка'
+Invoke-Expression $dispatchText
+$developmentResults = @($script:messages | Where-Object { $_ -like 'UI_RESULT *' } | ForEach-Object { $_.Substring(10) | ConvertFrom-Json })
+if ($developmentResults.Count -ne 6 -or @($developmentResults | Where-Object { -not (Get-DevelopmentPackages).Contains($_.Stage) }).Count)
+{
+    throw 'Development vendor dispatch crossed the component boundary'
+}
+$Vendor = $null
 $script:messages.Clear()
 $script:pluginTestText = 'invalid json'
 Invoke-CheckStage 'Codex plugins'
@@ -279,11 +300,11 @@ if (-not ($script:messages -match 'CHECK NOT_INSTALLED: Claude Code'))
 {
     throw 'Missing CLI misclassified'
 }
-if (-not ($script:messages -match 'CHECK UNKNOWN: Claude Desktop'))
+if (-not ($script:messages -match 'CHECK ERROR: Claude Desktop'))
 {
     throw 'Missing winget misclassified'
 }
-Write-Output 'PASS: all ten check-only stages, no modifying commands or restarts, available/current/unknown/missing outcomes'
+Write-Output 'PASS: all sixteen check-only stages, no modifying commands or restarts, available/current/unknown/error/missing outcomes'
 
 function Test-Tool
 {

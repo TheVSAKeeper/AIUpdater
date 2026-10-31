@@ -16,7 +16,7 @@
 У каждого AI-инструмента свой способ обновления: один сидит в Microsoft Store, другой в npm, третий
 притащил собственный установщик. Пока обойдёшь всех по очереди, забудешь, с кого начал.
 
-AIUpdater собирает инструменты OpenAI, Anthropic и Google в одном окне. Показывает установленные
+AIUpdater собирает инструменты OpenAI, Anthropic, Google и окружение разработки в одном окне. Показывает установленные
 и доступные версии, проверяет обновления и ставит выбранное. У каждого компонента своя карточка,
 у каждого провайдера свой журнал – если один споткнулся, результат другого не потеряется.
 
@@ -40,9 +40,30 @@ C#, WPF, .NET 10. Только Windows, тёмная тема, без путеш
 | OpenAI    | ChatGPT / Codex desktop, активный Codex CLI, глобальный npm-пакет Codex, плагины Codex |
 | Anthropic | Claude Desktop, Claude Code, глобальный npm-пакет Claude Code, плагины Claude          |
 | Google    | Antigravity Desktop, Antigravity CLI (`agy`)                                           |
+| Разработка | Windows Terminal, PowerShell 7, Docker Desktop, .NET SDK 10, Git, Node.js |
 
 Активный CLI и npm-пакет вынесены отдельно: команда из `PATH` может вести совсем не туда, куда npm
 ставит глобальные пакеты. Обновляешь тот компонент, которым пользуешься.
+
+Windows Terminal использует Microsoft Store:
+`winget upgrade --id 9N0DX20HK701 -e --source msstore`. Для обычных standalone-установок используется источник `winget`.
+Для Node.js определяется владелец активной команды: установка NVM обновляется через `nvm`, standalone – через
+winget с ID текущей major-ветки. Обновление Node не переводит её автоматически на новую major.
+Установка и удаление Node через winget блокируются, если команда принадлежит NVM. В shim-режиме NVM
+проверка требует отключённой автоустановки, чтобы чтение версии не устанавливало отсутствующую Node.
+Несколько PowerShell в PATH показываются как конфликт установок; global .NET tool не обновляется через winget.
+Карточка .NET обслуживает только уже установленные feature bands SDK ветки 10: для каждой группы
+1xx, 2xx и далее ищется последний стабильный патч в официальном манифесте Microsoft.
+Новые feature bands автоматически не добавляются. Системная x64-установка обновляется подписанными
+установщиками Microsoft с проверкой SHA512. На время установки политика `RemovePreviousVersion`
+для .NET 10 устанавливается в `never`, затем прежнее значение и тип восстанавливаются.
+Сохранение старых SDK и runtimes проверяется после установки, поэтому закреплённые версии
+из `global.json` остаются доступны. Снимки версий, политики и installer logs сохраняются рядом с журналом.
+Установка и удаление карточки при нескольких SDK по-прежнему блокируются, чтобы не выбрать
+произвольную версию. Другие SDK, отдельные рантаймы, WSL и образы Docker не обновляются.
+Отсутствие доступной версии Store в `winget list` означает
+неопределённый результат проверки, а не подтверждение актуальности.
+Если winget не может прочитать версии, карточка показывает ошибку проверки. Список карточек прокручивается.
 
 ---
 
@@ -147,6 +168,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build/verify.ps1
 dotnet build AIUpdater.slnx
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Scripts/Verify-Updater.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/Scripts/Verify-PackageChecks.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/Scripts/Verify-DevelopmentTools.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File tests/Scripts/Verify-Release.ps1
 dotnet run --project tests/AIUpdater.InterfaceChecks -- artifacts/interface-check
 ```
@@ -201,6 +223,52 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build/package-release.ps1
 и описание релиза. Локальная упаковка ничего не публикует.
 
 ---
+
+## Завершение миграции этого компьютера
+
+Сценарий `build/Finish-DevelopmentMigration.ps1` подготовлен для профиля
+`C:\Users\admin` по результатам аудита. Проверка без изменений:
+
+```powershell
+pwsh -NoProfile -File build/Finish-DevelopmentMigration.ps1
+```
+
+Для выполнения закрой Node/MCP, старый PowerShell из `.dotnet/tools` и Windows Terminal,
+затем запусти `build/Finish-DevelopmentMigration.cmd` из Проводника обычным двойным
+щелчком, без «Запуск от имени администратора». Откроется отдельная консоль PowerShell.
+При оставшихся Node/NVM/Terminal сценарий остановится, ничего не завершая.
+Занятый PowerShell global tool или недоступный путь процесса PowerShell откладывает
+только удаление global tool. Другие шаги продолжаются, а пропуск записывается в `result.json`.
+Фоновый `deletion-canary-watcher.ps1` первоначально использовал этот global tool.
+После согласованной временной остановки и миграции его задача переведена на штатный
+PowerShell и запущена снова. Других потребителей следует переносить отдельно.
+
+Он удаляет дублирующий PowerShell global tool, использует подготовленный подписанный
+установщик NVM 2.0.1, сохраняет имеющиеся версии Node, отключает `auto_install`,
+обновляет активную Node в пределах её major и запускает обновление Terminal через
+`winget upgrade --id 9N0DX20HK701 -e --source msstore`. Затем проверяет Node/npm,
+штатный PowerShell, регистрацию Terminal, неизменность двух проверенных `global.json`
+и убирает повторы User PATH с сохранением типа значения реестра.
+Если установлен нативный Codex, его каталог ставится перед NVM в User PATH,
+а `codex --version` проверяет, что команда не перехвачена shim NVM.
+
+Нужны сохранённые установщик и резервные копии из
+`.kc/scratch/development-environment-normalization` и
+`.kc/artifacts/development-environment-normalization`, а также доступ к сети.
+Журналы, снимки PATH и результат каждого запуска находятся в новой папке
+`.kc/artifacts/development-environment-normalization/deferred-*`.
+После ошибки устрани её причину и повтори запуск: сохранённое состояние позволяет
+продолжить миграцию. Автоматического отката нет; частично выполненные шаги отражаются
+в `result.json`.
+
+Старая самостоятельная MSI-регистрация Node удалена после проверки её файловых ресурсов;
+команды Node и сохранённые версии NVM проверены после удаления. Установщик удалил из User PATH
+каталог глобальных npm-команд, поэтому эта запись восстановлена на прежнем месте с сохранением
+переменных окружения и типа значения реестра.
+Оставшиеся регистрации PowerShell и Visual Studio,
+а также ранее отклонённые политикой
+операции с claude-sync и Python 3.13 перечисляются как оставшаяся работа.
+Сценарий их автоматически не выполняет и не объявляет всю нормализацию законченной.
 
 ## Чего не умеет
 
