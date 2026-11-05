@@ -1805,6 +1805,10 @@ function Invoke-UpdateStep
         $script:HadFailure = $true
         $script:FailureCount++
         Write-Log "$Name failed: $( $_.Exception.Message )"
+        if ($CheckOnly)
+        {
+            Write-CheckResult $Name 'ERROR' $_.Exception.Message -Info $_.Exception.Message
+        }
         if ($Name -eq 'Codex desktop')
         {
             Write-AppxEvents

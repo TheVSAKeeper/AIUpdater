@@ -326,3 +326,18 @@ finally
     if ($null -eq $oldProcessorArchitew6432) { Remove-Item Env:PROCESSOR_ARCHITEW6432 -ErrorAction SilentlyContinue } else { $env:PROCESSOR_ARCHITEW6432 = $oldProcessorArchitew6432 }
 }
 Write-Output 'PASS: agy absence and process failures, manifest comparison, malformed manifests, request failures, AMD64/ARM64/WOW architecture; updater never invoked'
+
+$CheckOnly = $true
+foreach ($stage in @('Claude Desktop', 'Antigravity Desktop', 'Codex plugins'))
+{
+    $script:messages.Clear()
+    $script:FailureCount = 0
+    $script:HadFailure = $false
+    Invoke-UpdateStep $stage { throw 'Simulated process start failure' }
+    $result = Read-Result
+    if ($result.Stage -ne $stage -or $result.Result -ne 'ERROR' -or $result.Info -ne 'Simulated process start failure' -or $script:FailureCount -ne 1 -or -not $script:HadFailure)
+    {
+        throw "Unhandled check failure did not produce one ERROR for $stage"
+    }
+}
+Write-Output 'PASS: unhandled check failures emit ERROR and preserve failure accounting'
