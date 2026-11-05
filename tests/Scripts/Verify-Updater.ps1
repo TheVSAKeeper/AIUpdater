@@ -166,7 +166,7 @@ function Invoke-CommandCapture
     }
     if ($FilePath -eq 'npm' -and $Arguments[0] -eq 'list')
     {
-        return [pscustomobject]@{ ExitCode = 0; Text = '{"dependencies":{"@openai/codex":{"version":"1.0.0"},"@anthropic-ai/claude-code":{"version":"1.0.0"}}}' }
+        return [pscustomobject]@{ ExitCode = 0; Text = '{"dependencies":{"@openai/codex":{"version":"1.0.0"},"@anthropic-ai/claude-code":{"version":"1.0.0"},"@deepseek-ai/dsh":{"version":"1.0.0"}}}' }
     }
     if ($FilePath -eq 'winget' -and $Arguments[0] -eq 'list')
     {
@@ -220,11 +220,11 @@ $manageScriptPath = Join-Path $scriptsDirectory 'Manage-Components.ps1'
 $dispatchText = $dispatch.Extent.Text.Replace(". (Join-Path `$PSScriptRoot 'Check-Updates.ps1')", '. $checkScriptPath').Replace(". (Join-Path `$PSScriptRoot 'Manage-Components.ps1')", '. $manageScriptPath').Replace('exit 1', 'throw ($script:messages -join "`n")')
 Invoke-Expression $dispatchText
 $checkResults = @($script:messages | Where-Object { $_ -match '^=== CHECK ' })
-if ($checkResults.Count -ne 16)
+if ($checkResults.Count -ne 17)
 {
-    throw "Expected sixteen check results; received $( $checkResults.Count )"
+    throw "Expected seventeen check results; received $( $checkResults.Count )"
 }
-if (@($checkResults | Where-Object { $_ -match 'CHECK AVAILABLE' }).Count -ne 14)
+if (@($checkResults | Where-Object { $_ -match 'CHECK AVAILABLE' }).Count -ne 15)
 {
     throw 'Available versions were not detected'
 }
@@ -241,7 +241,7 @@ if ($script:HadFailure)
     throw 'Check-only dispatcher failed'
 }
 $uiResults = @($script:messages | Where-Object { $_ -like 'UI_RESULT *' } | ForEach-Object { $_.Substring(10) | ConvertFrom-Json })
-if ($uiResults.Count -ne 16)
+if ($uiResults.Count -ne 17)
 {
     throw 'Missing structured results for check-only stages'
 }
@@ -304,7 +304,7 @@ if (-not ($script:messages -match 'CHECK ERROR: Claude Desktop'))
 {
     throw 'Missing winget misclassified'
 }
-Write-Output 'PASS: all sixteen check-only stages, no modifying commands or restarts, available/current/unknown/error/missing outcomes'
+Write-Output 'PASS: all seventeen check-only stages, no modifying commands or restarts, available/current/unknown/error/missing outcomes'
 
 function Test-Tool
 {
@@ -688,6 +688,51 @@ if (-not ($script:commands -contains 'npm view @openai/codex version --silent'))
     throw 'Stable lookup changed channel'
 }
 Write-Output 'PASS: prerelease parsing and precedence, alpha/stable lookups, read-only alpha checks, pinned native/npm updates, missing/wrong channels, current alpha skip'
+
+$script:dshVersion = '0.2.1-rc.5'
+function Invoke-CommandCapture
+{
+    param($FilePath, $Arguments, [switch]$NoLogCommand)
+    $script:commands.Add("$FilePath $( $Arguments -join ' ' )")
+    if ($FilePath -eq 'npm' -and $Arguments[0] -eq 'list')
+    {
+        return [pscustomobject]@{ ExitCode = 0; Text = ('{"dependencies":{"@deepseek-ai/dsh":{"version":"' + $script:dshVersion + '"}}}') }
+    }
+    if ($FilePath -eq 'npm' -and ($Arguments -join ' ') -eq 'view @deepseek-ai/dsh version --silent')
+    {
+        return [pscustomobject]@{ ExitCode = 0; Text = '0.2.1-rc.6' }
+    }
+    throw 'Unexpected DSH command'
+}
+function Invoke-LoggedCommand
+{
+    param($FilePath, $Arguments)
+    $script:commands.Add("$FilePath $( $Arguments -join ' ' )")
+    $script:dshVersion = '0.2.1-rc.6'
+}
+$CheckOnly = $true
+$OnlyStage = $null
+$Vendor = 'DeepSeek'
+$script:messages.Clear()
+$script:commands.Clear()
+Invoke-Expression $dispatchText
+$dshResults = @($script:messages | Where-Object { $_ -like 'UI_RESULT *' } | ForEach-Object { $_.Substring(10) | ConvertFrom-Json })
+if ($dshResults.Count -ne 1 -or $dshResults[0].Stage -ne 'DSH' -or $dshResults[0].Result -ne 'AVAILABLE' -or ($script:commands -match 'npm install'))
+{
+    throw 'DSH vendor check crossed a component boundary, changed software or missed the RC update'
+}
+Update-NpmGlobalPackage '@deepseek-ai/dsh' 'DSH'
+if (-not ($script:commands -contains 'npm install -g @deepseek-ai/dsh@0.2.1-rc.6'))
+{
+    throw 'DSH update did not install the compared latest version'
+}
+Invoke-ComponentAction 'DSH' 'Install'
+Invoke-ComponentAction 'DSH' 'Uninstall'
+if (-not ($script:commands -contains 'npm install -g @deepseek-ai/dsh@latest') -or -not ($script:commands -contains 'npm uninstall -g @deepseek-ai/dsh'))
+{
+    throw 'DSH lifecycle did not use its npm package'
+}
+Write-Output 'PASS: DSH vendor isolation, read-only RC comparison through latest, pinned update and npm install/uninstall'
 
 $script:messages.Clear()
 $script:postActionUpdated = $false

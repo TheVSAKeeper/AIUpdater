@@ -10,6 +10,7 @@
         'Claude plugins',
         'Antigravity Desktop',
         'Antigravity CLI',
+        'DSH',
         'Windows Terminal',
         'PowerShell 7',
         'Docker Desktop',
@@ -18,7 +19,7 @@
         'Node.js LTS'
     )]
     [string]$OnlyStage,
-    [ValidateSet('OpenAI', 'Anthropic', 'Google', 'Разработка')]
+    [ValidateSet('OpenAI', 'Anthropic', 'Google', 'DeepSeek', 'Разработка')]
     [string]$Vendor,
     [switch]$CheckOnly,
     [ValidateSet('Update', 'Install', 'Uninstall')]
@@ -591,7 +592,7 @@ function Get-NpmLatestVersion
         return $null
     }
 
-    $channel = Get-NpmReleaseChannel $InstalledVersion
+    $channel = if ($PackageName -eq '@deepseek-ai/dsh') { 'latest' } else { Get-NpmReleaseChannel $InstalledVersion }
     Write-Log "Checking npm release channel for ${PackageName}: $channel"
     $field = if ($channel -eq 'latest')
     {
@@ -613,7 +614,7 @@ function Get-NpmLatestVersion
     {
         Write-Log "npm latest lookup returned an unparsable version for ${PackageName}: $( $result.Text )"
     }
-    elseif ((Get-NpmReleaseChannel $latest) -ne $channel)
+    elseif ($PackageName -ne '@deepseek-ai/dsh' -and (Get-NpmReleaseChannel $latest) -ne $channel)
     {
         Write-Log "npm channel $channel returned a different release channel; comparison unavailable"
         return $null
@@ -1848,6 +1849,7 @@ try
         'Claude plugins' = { Update-ClaudePlugins }
         'Antigravity Desktop' = { Update-AntigravityDesktop }
         'Antigravity CLI' = { Update-AntigravityCli }
+        'DSH' = { Update-NpmGlobalPackage -PackageName '@deepseek-ai/dsh' -DisplayName 'DSH' }
     }
 
     $developmentPackages = Get-DevelopmentPackages
@@ -1865,6 +1867,10 @@ try
         elseif ($step.Key -match 'Claude')
         {
             'Anthropic'
+        }
+        elseif ($step.Key -eq 'DSH')
+        {
+            'DeepSeek'
         }
         elseif ($developmentPackages.Contains($step.Key))
         {

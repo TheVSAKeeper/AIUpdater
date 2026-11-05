@@ -98,7 +98,7 @@ function Read-Result
     return $results[0]
 }
 
-foreach ($package in @('@openai/codex', '@anthropic-ai/claude-code'))
+foreach ($package in @('@openai/codex', '@anthropic-ai/claude-code', '@deepseek-ai/dsh'))
 {
     foreach ($case in @(
         @{ Code = 0; Text = '{"name":"npm"}'; Expected = 'NOT_INSTALLED' },
@@ -171,7 +171,7 @@ if ((Read-Result).Result -ne 'ERROR')
     throw 'Failed npm launch became absence'
 }
 $script:throwCapture = $false
-Write-Output 'PASS: both npm packages, absence from complete inventory, exit/JSON/version failures, missing npm, failed launch, registry failure preserving installed version'
+Write-Output 'PASS: Codex, Claude and DSH npm packages, absence from complete inventory, exit/JSON/version failures, missing npm, failed launch, registry failure preserving installed version'
 
 $oldProcessorArchitecture = $env:PROCESSOR_ARCHITECTURE
 $oldProcessorArchitew6432 = $env:PROCESSOR_ARCHITEW6432

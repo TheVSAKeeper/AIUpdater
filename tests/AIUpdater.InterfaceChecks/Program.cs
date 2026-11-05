@@ -286,7 +286,7 @@ file static class Program
             var directChoices = Descendants<CheckBox>(root).Where(box => box.DataContext is UpdateStage { PackageStatus: PackageStatus.DirectUpdate }).ToArray();
             Check(directChoices.Length == 2 && directChoices.All(box => box.Visibility == Visibility.Visible && box.IsChecked == false), "Direct-update checkboxes are hidden or checked by default");
             var cards = Descendants<Border>(root).Where(border => border.ContextMenu is not null).ToArray();
-            Check(cards.Length == 16 && cards.Max(card => card.ActualWidth) - cards.Min(card => card.ActualWidth) < 1, "Vendor card grid widths differ");
+            Check(cards.Length == 17 && cards.Max(card => card.ActualWidth) - cards.Min(card => card.ActualWidth) < 1, "Vendor card grid widths differ");
             foreach (var row in Descendants<Button>(root).Where(button => Equals(button.Tag, "Stage")).GroupBy(button => Math.Round(button.TranslatePoint(new(0, 0), root).Y)))
             {
                 var positions = row.Select(button => Descendants<TextBlock>(button).First().TranslatePoint(new(0, 0), root).Y).ToArray();

@@ -81,6 +81,7 @@ public partial class MainWindow
         new() { Id = "Claude plugins", Vendor = "Anthropic", Name = "Claude плагины" },
         new() { Id = "Antigravity Desktop", Vendor = "Google", Name = "Antigravity Desktop" },
         new() { Id = "Antigravity CLI", Vendor = "Google", Name = "Antigravity CLI (agy)" },
+        new() { Id = "DSH", Vendor = "DeepSeek", Name = "DeepSeek Harness (DSH)" },
         new() { Id = "Windows Terminal", Vendor = "Разработка", Name = "Windows Terminal" },
         new() { Id = "PowerShell 7", Vendor = "Разработка", Name = "PowerShell 7" },
         new() { Id = "Docker Desktop", Vendor = "Разработка", Name = "Docker Desktop" },

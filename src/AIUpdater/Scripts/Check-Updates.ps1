@@ -322,6 +322,9 @@ function Invoke-CheckStage
         'Claude Desktop' {
             Test-WingetUpdate $Stage 'Anthropic.Claude' 'winget'
         }
+        'DSH' {
+            Test-CliUpdate $Stage 'dsh' '@deepseek-ai/dsh' -NpmPackage
+        }
         'Claude Code' {
             Test-CliUpdate $Stage 'claude' '@anthropic-ai/claude-code'
         }

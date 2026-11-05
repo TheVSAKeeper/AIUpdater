@@ -360,9 +360,13 @@ function Invoke-ComponentAction
         return
     }
 
-    if ($Stage -in @('Codex npm package', 'Claude npm package', 'Active Codex CLI'))
+    if ($Stage -in @('Codex npm package', 'Claude npm package', 'Active Codex CLI', 'DSH'))
     {
-        $npmPackage = if ($Stage -match 'Codex')
+        $npmPackage = if ($Stage -eq 'DSH')
+        {
+            '@deepseek-ai/dsh'
+        }
+        elseif ($Stage -match 'Codex')
         {
             '@openai/codex'
         }
