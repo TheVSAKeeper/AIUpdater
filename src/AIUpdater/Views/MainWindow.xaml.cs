@@ -10,6 +10,7 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Media;
 
 namespace AIUpdater.Views;
@@ -20,7 +21,9 @@ public partial class MainWindow
     private readonly string _logPath;
     private readonly string _resultsPath;
     private readonly List<Process> _processes = [];
+    private readonly List<TextBox> _vendorLogBoxes = [];
     private UpdateStage[] _runStages = [];
+    private double _logFontSize = 12;
     private bool _isRunning;
     private bool _stopRequested;
     private bool _checkOnly;
@@ -241,6 +244,37 @@ public partial class MainWindow
         Process.Start(new ProcessStartInfo(Path.GetDirectoryName(_logPath)!) { UseShellExecute = true });
     }
 
+    private void LogZoomOutButton_Click(object sender, RoutedEventArgs e)
+    {
+        SetLogFontSize(_logFontSize - 1);
+    }
+
+    private void LogZoomInButton_Click(object sender, RoutedEventArgs e)
+    {
+        SetLogFontSize(_logFontSize + 1);
+    }
+
+    private void LogTabs_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control)
+        {
+            return;
+        }
+
+        SetLogFontSize(_logFontSize + (e.Delta > 0 ? 1 : -1));
+        e.Handled = true;
+    }
+
+    private void SetLogFontSize(double size)
+    {
+        _logFontSize = Math.Clamp(size, 10, 20);
+        LogTextBox.FontSize = _logFontSize;
+        foreach (var box in _vendorLogBoxes)
+        {
+            box.FontSize = _logFontSize;
+        }
+    }
+
     private static string CheckSummary(IEnumerable<UpdateStage> stages)
     {
         var selected = stages.ToArray();
@@ -321,16 +355,24 @@ public partial class MainWindow
         status.SetBinding(TextBlock.ForegroundProperty, new Binding(nameof(VendorStatus.StatusBrush)));
         header.Children.Add(status);
         var content = new DockPanel();
-        var detail = new TextBlock { Margin = new(12), TextWrapping = TextWrapping.Wrap };
+        var detail = new TextBlock
+        {
+            Margin = new(10, 3, 10, 3),
+            FontSize = 11,
+            Foreground = (Brush)FindResource("MutedBrush"),
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
         detail.SetBinding(TextBlock.TextProperty, new Binding(nameof(VendorStatus.Detail)));
+        detail.SetBinding(ToolTipProperty, new Binding(nameof(VendorStatus.Detail)));
         DockPanel.SetDock(detail, Dock.Top);
         content.Children.Add(detail);
         var log = new TextBox
         {
-            IsReadOnly = true, AcceptsReturn = true, Padding = new(14),
+            IsReadOnly = true, AcceptsReturn = true, Padding = new(10, 6, 10, 6),
             Background = new SolidColorBrush(Color.FromRgb(12, 23, 18)),
             Foreground = new SolidColorBrush(Color.FromRgb(204, 228, 214)),
-            FontFamily = new("Cascadia Mono, Consolas"), FontSize = 12,
+            FontFamily = new("Cascadia Mono, Consolas"), FontSize = _logFontSize,
             TextWrapping = TextWrapping.Wrap,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
@@ -338,6 +380,7 @@ public partial class MainWindow
 
         log.SetBinding(TextBox.TextProperty, new Binding(nameof(VendorStatus.Log)) { Mode = BindingMode.OneWay });
         log.TextChanged += (_, _) => log.ScrollToEnd();
+        _vendorLogBoxes.Add(log);
         content.Children.Add(log);
         LogTabs.Items.Add(new TabItem { Header = header, Content = content, DataContext = vendor });
     }
@@ -734,7 +777,7 @@ public partial class MainWindow
             return;
         }
 
-        if (isError || line.Contains(" failed:", StringComparison.OrdinalIgnoreCase) || line.Contains("update failed for ", StringComparison.OrdinalIgnoreCase))
+        if (line.Contains(" failed:", StringComparison.OrdinalIgnoreCase) || line.Contains("update failed for ", StringComparison.OrdinalIgnoreCase))
         {
             run.SawError = true;
             run.ActiveStage?.SetFailed();

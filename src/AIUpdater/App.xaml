@@ -483,7 +483,7 @@
                     <ControlTemplate TargetType="TabItem">
                         <Border x:Name="TabBorder"
                                 Background="#121F1A"
-                                Padding="16,11"
+                                Padding="12,6"
                                 BorderThickness="0,0,0,2"
                                 BorderBrush="Transparent">
                             <ContentPresenter ContentSource="Header" />
@@ -553,6 +553,42 @@
                         <Border Height="1"
                                 Margin="5,4"
                                 Background="{StaticResource BorderBrush}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="GridSplitter">
+            <Setter Property="Background"
+                    Value="Transparent" />
+            <Setter Property="FocusVisualStyle"
+                    Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="GridSplitter">
+                        <Border Background="{TemplateBinding Background}"
+                                Padding="0,3">
+                            <Border x:Name="GripBar"
+                                    Width="44"
+                                    Height="3"
+                                    CornerRadius="1.5"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{StaticResource BorderBrush}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver"
+                                     Value="True">
+                                <Setter TargetName="GripBar"
+                                        Property="Background"
+                                        Value="{StaticResource AccentTextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused"
+                                     Value="True">
+                                <Setter TargetName="GripBar"
+                                        Property="Background"
+                                        Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>

@@ -19,8 +19,9 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="2*" />
-            <RowDefinition Height="*" />
+            <RowDefinition Height="1.35*" MinHeight="170" />
+            <RowDefinition Height="10" />
+            <RowDefinition Height="*" MinHeight="165" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <Grid>
@@ -262,35 +263,61 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
-        <Grid Grid.Row="3"
-              MinHeight="140">
+        <GridSplitter x:Name="LogSplitter"
+                      Grid.Row="3"
+                      Height="10"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Center"
+                      ShowsPreview="False"
+                      ResizeDirection="Rows"
+                      ResizeBehavior="PreviousAndNext"
+                      ToolTip="Изменить высоту журнала выполнения" />
+        <Grid Grid.Row="4"
+              MinHeight="165">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" /><RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <DockPanel Margin="0,0,0,10">
+            <DockPanel Margin="0,0,0,6">
                 <Button x:Name="OpenLogButton"
                         DockPanel.Dock="Right"
                         Content="Открыть лог"
                         Click="OpenLogButton_Click"
-                        MinHeight="28"
-                        Padding="10,4" />
+                        MinHeight="26"
+                        Padding="10,3" />
                 <Button x:Name="LogFolderButton"
                         DockPanel.Dock="Right"
                         Content="Папка журналов"
                         Click="LogFolderButton_Click"
-                        MinHeight="28"
-                        Padding="10,4"
+                        MinHeight="26"
+                        Padding="10,3"
                         Margin="0,0,8,0" />
+                <Button x:Name="LogZoomInButton"
+                        DockPanel.Dock="Right"
+                        Content="A+"
+                        Click="LogZoomInButton_Click"
+                        MinHeight="26"
+                        Padding="8,3"
+                        Margin="0,0,8,0"
+                        ToolTip="Увеличить шрифт журнала (Ctrl + Колесо мыши)" />
+                <Button x:Name="LogZoomOutButton"
+                        DockPanel.Dock="Right"
+                        Content="A-"
+                        Click="LogZoomOutButton_Click"
+                        MinHeight="26"
+                        Padding="8,3"
+                        Margin="0,0,6,0"
+                        ToolTip="Уменьшить шрифт журнала (Ctrl + Колесо мыши)" />
                 <TextBlock Text="Журнал выполнения"
                            FontSize="13"
                            FontWeight="SemiBold"
                            VerticalAlignment="Center" />
             </DockPanel>
             <TabControl x:Name="LogTabs"
-                        Grid.Row="1">
+                        Grid.Row="1"
+                        PreviewMouseWheel="LogTabs_PreviewMouseWheel">
                 <TabItem Header="Общий журнал">
                     <TextBox x:Name="LogTextBox"
-                             Padding="12,10,12,14"
+                             Padding="10,6,10,6"
                              Background="#0C1712"
                              BorderThickness="0"
                              Foreground="#CCE4D6"
@@ -304,8 +331,8 @@
                 </TabItem>
             </TabControl>
         </Grid>
-        <Grid Grid.Row="4"
-              Margin="0,10,0,0">
+        <Grid Grid.Row="5"
+              Margin="0,8,0,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="3" /><RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
