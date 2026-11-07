@@ -2,6 +2,8 @@
 
 public sealed record ChangelogSource(string? PageUrl, string? DownloadUrl, string Format, string Note);
 
+public sealed record ReleaseBadge(string Text, string Kind, double FontSize);
+
 public enum ChangeCategory
 {
     None = 0,

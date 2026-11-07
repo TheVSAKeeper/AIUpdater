@@ -1,71 +1,43 @@
-﻿using System.ComponentModel;
-using System.Runtime.CompilerServices;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using System.Windows.Media;
 
 namespace AIUpdater.Models;
 
-public sealed class VendorStatus(string name, string logPath) : INotifyPropertyChanged
+public sealed class VendorStatus(string name, string logPath) : ObservableObject
 {
-    private string _status = "";
-    private string _detail = "Готов к проверке обновлений";
-    private string _log = "";
-    private Brush _brush = Brushes.Gray;
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-
     public string Name { get; } = name;
     public IReadOnlyList<UpdateStage> Stages { get; init; } = [];
-    public string LogPath { get; } = logPath;
+    public IReadOnlyList<object> Cards { get; init; } = [];
+    public string LogPath { get; internal set; } = logPath;
 
     public string Status
     {
-        get => _status;
-        private set
-        {
-            _status = value;
-            Notify();
-        }
-    }
+        get;
+        private set => SetProperty(ref field, value);
+    } = "";
 
     public string Detail
     {
-        get => _detail;
-        set
-        {
-            _detail = value;
-            Notify();
-        }
-    }
+        get;
+        set => SetProperty(ref field, value);
+    } = "Готов к проверке обновлений";
 
     public string Log
     {
-        get => _log;
-        set
-        {
-            _log = value;
-            Notify();
-        }
-    }
+        get;
+        set => SetProperty(ref field, value);
+    } = "";
 
     public Brush StatusBrush
     {
-        get => _brush;
-        private set
-        {
-            _brush = value;
-            Notify();
-        }
-    }
+        get;
+        private set => SetProperty(ref field, value);
+    } = Brushes.Gray;
 
     public void SetStatus(string status, string detail, Brush brush)
     {
         Status = status;
         Detail = detail;
         StatusBrush = brush;
-    }
-
-    private void Notify([CallerMemberName] string? name = null)
-    {
-        PropertyChanged?.Invoke(this, new(name));
     }
 }

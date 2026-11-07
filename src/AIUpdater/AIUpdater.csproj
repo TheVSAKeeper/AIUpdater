@@ -13,6 +13,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AIUpdater.InterfaceChecks" />
     <Resource Include="Assets\AIUpdater.ico" />
     <Resource Include="Assets\AIUpdater.png" />
     <None Update="Scripts\*.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="%(Filename)%(Extension)" />
