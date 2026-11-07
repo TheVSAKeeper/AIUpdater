@@ -3,15 +3,19 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $fixture = Join-Path ([IO.Path]::GetTempPath()) "aiu-release-check-$([guid]::NewGuid().ToString('N'))"
 $fixtureBuild = Join-Path $fixture 'build'
+$fixtureGithub = Join-Path $fixture '.github'
 New-Item -ItemType Directory -Path $fixtureBuild -Force | Out-Null
-foreach ($name in @('release-info.ps1', 'bump-version.ps1'))
+New-Item -ItemType Directory -Path $fixtureGithub -Force | Out-Null
+foreach ($name in @('release-info.ps1', 'bump-version.ps1', 'render-release-notes.ps1'))
 {
     Copy-Item -LiteralPath (Join-Path $projectRoot "build\$name") -Destination (Join-Path $fixtureBuild $name)
 }
+Copy-Item -LiteralPath (Join-Path $projectRoot '.github\release-body.md') -Destination (Join-Path $fixtureGithub 'release-body.md')
 $propsPath = Join-Path $fixture 'Directory.Build.props'
 $changelogPath = Join-Path $fixture 'CHANGELOG.md'
 $infoScript = Join-Path $fixtureBuild 'release-info.ps1'
 $bumpScript = Join-Path $fixtureBuild 'bump-version.ps1'
+$renderScript = Join-Path $fixtureBuild 'render-release-notes.ps1'
 
 function Set-Fixture([string]$Version, [string]$Notes)
 {
@@ -63,5 +67,13 @@ Assert-Rejected { & $infoScript } '*непустой раздел*'
 Set-Fixture '1' $notes
 & $bumpScript -Version 3 | Out-Null
 if ((& $infoScript).Version -ne '3') { throw 'Явный номер не принят' }
+$rendered = & $renderScript -Version 3
+foreach ($expected in @('## Скачать', 'AIUpdater-v3-win-x64.zip', 'AIUpdater-v3-win-x64-portable.zip', '## Статистика', '## Изменения', '- Третья версия'))
+{
+    if ($rendered -notlike "*$expected*")
+    {
+        throw "Описание релиза не содержит ожидаемый фрагмент: $expected"
+    }
+}
 Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
 Write-Output 'PASS: vN and vN.P, next/patch/explicit increments, rollback and repeat rejection, required unique notes, invalid numbers, no changes on rejection'

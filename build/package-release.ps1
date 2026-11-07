@@ -61,23 +61,6 @@ $sums = foreach ($file in Get-ChildItem -LiteralPath $dist -Filter '*.zip' | Sor
     "$hash  $($file.Name)"
 }
 [IO.File]::WriteAllLines((Join-Path $dist 'SHA256SUMS.txt'), $sums, [Text.UTF8Encoding]::new($false))
-$notes = @"
-# AIUpdater $($release.Tag)
-
-## Скачать
-
-| Архив | Требования |
-|-------|------------|
-| ``AIUpdater-$($release.Tag)-win-x64.zip`` | [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
-| ``AIUpdater-$($release.Tag)-win-x64-portable.zip`` | Рантайм включён в архив |
-
-Распакуй архив целиком и запусти ``AIUpdater.exe``. Три PowerShell-скрипта должны оставаться рядом.
-Оба варианта хранят результаты и журналы в ``%LOCALAPPDATA%\AIUpdater\Logs``.
-Контрольные суммы архивов находятся в ``SHA256SUMS.txt``.
-
-## Изменения
-
-$($release.Notes)
-"@
+$notes = & (Join-Path $PSScriptRoot 'render-release-notes.ps1') -Version $release.Version
 [IO.File]::WriteAllText((Join-Path $outputPath 'release-notes.md'), $notes + "`n", [Text.UTF8Encoding]::new($false))
 Write-Output "Архивы $($release.Tag): $dist"

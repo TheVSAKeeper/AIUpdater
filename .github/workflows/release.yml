@@ -33,6 +33,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
       - name: Check version, notes and existing release
         id: release
         shell: pwsh
@@ -56,6 +57,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
@@ -115,4 +117,4 @@ jobs:
           gh release create "$TAG" \
             release-files/dist/*.zip release-files/dist/SHA256SUMS.txt \
             --target "$RELEASE_SHA" --title "AIUpdater $TAG" \
-            --notes-file release-files/release-notes.md --generate-notes
+            --notes-file release-files/release-notes.md
