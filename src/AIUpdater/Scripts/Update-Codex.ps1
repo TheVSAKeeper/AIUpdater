@@ -120,44 +120,59 @@ function Invoke-LoggedCommand
 
         $lastLoggedProgress = -10
         $progressActive = $false
+        $previousErrorActionPreference = $ErrorActionPreference
+        try
+        {
+            $ErrorActionPreference = 'Continue'
+            & $FilePath @Arguments 2>&1 | ForEach-Object {
+                $raw = if ($_ -is [System.Management.Automation.ErrorRecord])
+                {
+                    $_.Exception.Message
+                }
+                else
+                {
+                    [string]$_
+                }
+                $text = $raw.TrimEnd()
 
-        & $FilePath @Arguments 2>&1 | ForEach-Object {
-            $line = $_
-            $text = ($line | Out-String).TrimEnd()
+                $progressMatch = [regex]::Match($text, '([0-9]{1,3})%')
+                if ($progressMatch.Success -and $text -match '[\u2588\u2592]|(?:KB|MB|GB)')
+                {
+                    $percent = [int]$progressMatch.Groups[1].Value
+                    Write-Host "`r$text" -NoNewline
+                    $progressActive = $true
 
-            $progressMatch = [regex]::Match($text, '([0-9]{1,3})%')
-            if ($progressMatch.Success -and $text -match '[\u2588\u2592]|(?:KB|MB|GB)')
-            {
-                $percent = [int]$progressMatch.Groups[1].Value
-                Write-Host "`r$text" -NoNewline
-                $progressActive = $true
+                    if ($percent -ge ($lastLoggedProgress + 10) -or $percent -eq 100)
+                    {
+                        Add-Content -LiteralPath $logPath -Encoding UTF8 -Value $text
+                        $lastLoggedProgress = $percent
+                    }
+                    return
+                }
 
-                if ($percent -ge ($lastLoggedProgress + 10) -or $percent -eq 100)
+                if ($text.Trim() -match '^[-\\|/]$')
+                {
+                    Write-Host "`r$text" -NoNewline
+                    $progressActive = $true
+                    return
+                }
+
+                if ($progressActive)
+                {
+                    Write-Host
+                    $progressActive = $false
+                }
+
+                if ($text.Length -gt 0)
                 {
                     Add-Content -LiteralPath $logPath -Encoding UTF8 -Value $text
-                    $lastLoggedProgress = $percent
+                    Write-Host $text
                 }
-                return
             }
-
-            if ($text.Trim() -match '^[-\\|/]$')
-            {
-                Write-Host "`r$text" -NoNewline
-                $progressActive = $true
-                return
-            }
-
-            if ($progressActive)
-            {
-                Write-Host
-                $progressActive = $false
-            }
-
-            if ($text.Length -gt 0)
-            {
-                Add-Content -LiteralPath $logPath -Encoding UTF8 -Value $text
-                Write-Host $text
-            }
+        }
+        finally
+        {
+            $ErrorActionPreference = $previousErrorActionPreference
         }
 
         if ($progressActive)
@@ -245,9 +260,33 @@ function Invoke-CommandCaptureCore
             Set-Location -LiteralPath $WorkingDirectory
         }
 
-        $output = & $FilePath @Arguments 2>&1
-        $exitCode = $LASTEXITCODE
-        $text = ($output | Out-String).Trim()
+        $previousErrorActionPreference = $ErrorActionPreference
+        try
+        {
+            $ErrorActionPreference = 'Continue'
+            $output = & $FilePath @Arguments 2>&1
+            $exitCode = $LASTEXITCODE
+        }
+        finally
+        {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        $lines = @(foreach ($item in @($output))
+        {
+            if ($null -eq $item)
+            {
+                continue
+            }
+            if ($item -is [System.Management.Automation.ErrorRecord])
+            {
+                $item.Exception.Message
+            }
+            else
+            {
+                [string]$item
+            }
+        })
+        $text = ($lines -join [Environment]::NewLine).Trim()
 
         if (-not $NoLogCommand -and $text.Length -gt 0)
         {
@@ -745,17 +784,7 @@ function Stop-CodexProcess
 
     if ($null -eq $mainProcess)
     {
-        Write-Log 'ChatGPT window is not visible; opening it to request a normal window close'
-        Start-Process "shell:AppsFolder\$appId"
-        Start-Sleep -Seconds 3
-        $mainProcess = @(Get-CodexDesktopProcesses) |
-            Where-Object { $_.ProcessName -eq 'ChatGPT' -and $_.MainWindowHandle -ne 0 } |
-            Select-Object -First 1
-    }
-
-    if ($null -eq $mainProcess)
-    {
-        Write-Log 'ChatGPT window could not be opened; background package processes will be stopped automatically'
+        Write-Log 'ChatGPT window is not visible; background package processes will be stopped automatically'
     }
     else
     {
@@ -951,8 +980,8 @@ try {
     $invokeArguments = @{
         PackageFamilyName = 'OpenAI.Codex_2p2nqsd0c76g0'
         AppId = 'App'
-        Command = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
-        Args = "-NoProfile -EncodedCommand $encodedCommand"
+        Command = 'C:\Windows\System32\conhost.exe'
+        Args = "--headless C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $encodedCommand"
         PreventBreakaway = $true
     }
     Invoke-CommandInDesktopPackage @invokeArguments | Out-Null
@@ -1010,9 +1039,12 @@ public static class StoreWindowBridge
 try {
     `$form = New-Object System.Windows.Forms.Form
     `$form.ShowInTaskbar = `$false
-    `$form.WindowState = 'Minimized'
+    `$form.FormBorderStyle = 'None'
+    `$form.StartPosition = 'Manual'
+    `$form.Location = New-Object System.Drawing.Point(-32000, -32000)
+    `$form.Size = New-Object System.Drawing.Size(1, 1)
     `$form.Opacity = 0
-    `$form.Show()
+    `$null = `$form.Handle
 
     `$context = [Windows.Services.Store.StoreContext,Windows.Services.Store,ContentType=WindowsRuntime]::GetDefault()
     [StoreWindowBridge]::Initialize(`$context, `$form.Handle)
@@ -1111,8 +1143,8 @@ try {
     $invokeArguments = @{
         PackageFamilyName = 'OpenAI.Codex_2p2nqsd0c76g0'
         AppId = 'App'
-        Command = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
-        Args = "-NoProfile -STA -EncodedCommand $encodedCommand"
+        Command = 'C:\Windows\System32\conhost.exe'
+        Args = "--headless C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -STA -EncodedCommand $encodedCommand"
         PreventBreakaway = $true
     }
     Invoke-CommandInDesktopPackage @invokeArguments | Out-Null
@@ -1897,9 +1929,9 @@ try
             {
                 Invoke-UpdateStep -Name $step.Key -ScriptBlock $step.Value
             }
-            if (-not $CheckOnly -and $script:FailureCount -eq $failureBeforeAction)
+            if (-not $CheckOnly)
             {
-                if ($Action -eq 'Uninstall')
+                if ($Action -eq 'Uninstall' -and $script:FailureCount -eq $failureBeforeAction)
                 {
                     Write-CheckResult $step.Key 'NOT_INSTALLED' 'Component removed'
                 }
@@ -1911,7 +1943,10 @@ try
                     }
                     catch
                     {
-                        Write-CheckResult $step.Key 'UNKNOWN' "Post-action check failed: $( $_.Exception.Message )"
+                        if ($script:FailureCount -eq $failureBeforeAction)
+                        {
+                            Write-CheckResult $step.Key 'UNKNOWN' "Post-action check failed: $( $_.Exception.Message )"
+                        }
                     }
                 }
             }

@@ -769,4 +769,106 @@ if ($postAction.Count -ne 1 -or $postAction[0].Stage -ne 'Claude Code' -or $post
 {
     throw 'Dispatcher did not publish the post-update version'
 }
-Write-Output 'PASS: dispatcher publishes a structured version result after updating the selected component'
+
+$script:messages.Clear()
+function Update-ClaudeCode
+{
+    throw 'simulated updater failure after partial install'
+}
+$failedDispatch = $false
+try
+{
+    Invoke-Expression $dispatchText
+}
+catch
+{
+    $failedDispatch = $true
+}
+if (-not $failedDispatch -or -not ($script:messages -contains '=== FAILED: Claude Code ==='))
+{
+    throw 'Failed update did not report failure'
+}
+$postFailedAction = @($script:messages | Where-Object { $_ -like 'UI_RESULT *' } | ForEach-Object { $_.Substring(10) | ConvertFrom-Json })
+if ($postFailedAction.Count -ne 1 -or $postFailedAction[0].Stage -ne 'Claude Code' -or $postFailedAction[0].Installed -ne '2.2.1')
+{
+    throw 'Dispatcher skipped post-action version check after an update failure'
+}
+
+foreach ($fnName in @('Invoke-LoggedCommand', 'Invoke-CommandCaptureCore', 'Get-CodexPackagedStoreUpdateState', 'Start-CodexPackagedStoreInstall', 'Stop-CodexProcess'))
+{
+    $fnAst = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $fnName }, $false)[0]
+    Invoke-Expression $fnAst.Extent.Text
+}
+$logPath = Join-Path ([IO.Path]::GetTempPath()) "AIUpdater-stderr-test-$([guid]::NewGuid().ToString('N')).log"
+try
+{
+    Set-Content -LiteralPath $logPath -Encoding UTF8 -Value ''
+    Invoke-LoggedCommand -FilePath 'cmd.exe' -Arguments @('/c', 'echo npm warn EBADENGINE Unsupported engine 1>&2 & echo added 1 package & exit /b 0')
+    $loggedLines = Get-Content -LiteralPath $logPath
+    if (-not ($loggedLines -match 'npm warn EBADENGINE Unsupported engine') -or -not ($loggedLines -match 'added 1 package') -or ($loggedLines -match 'RemoteException|NativeCommandError'))
+    {
+        throw 'Invoke-LoggedCommand corrupted or failed on stderr warnings with exit code 0'
+    }
+    $captureRes = Invoke-CommandCaptureCore -FilePath 'cmd.exe' -Arguments @('/c', 'echo npm warn EBADENGINE 1>&2 & echo 0.2.2-rc.1 & exit /b 0') -NoLogCommand
+    if ($captureRes.ExitCode -ne 0 -or $captureRes.Text -notmatch 'npm warn EBADENGINE' -or $captureRes.Text -notmatch '0\.2\.2-rc\.1' -or $captureRes.Text -match 'RemoteException|NativeCommandError')
+    {
+        throw 'Invoke-CommandCaptureCore failed or formatted ErrorRecord noise on stderr warnings'
+    }
+    $nonZeroFailed = $false
+    try
+    {
+        Invoke-LoggedCommand -FilePath 'cmd.exe' -Arguments @('/c', 'echo npm ERR! code E404 1>&2 & exit /b 2')
+    }
+    catch
+    {
+        $nonZeroFailed = $true
+    }
+    if (-not $nonZeroFailed)
+    {
+        throw 'Invoke-LoggedCommand accepted a non-zero exit code'
+    }
+}
+finally
+{
+    Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
+}
+
+$script:desktopPackageCalls = [System.Collections.Generic.List[hashtable]]::new()
+function Invoke-CommandInDesktopPackage
+{
+    param($PackageFamilyName, $AppId, $Command, $Args, $PreventBreakaway)
+    $commandArgs = [string]$PSBoundParameters['Args']
+    $script:desktopPackageCalls.Add(@{ Command = $Command; Args = $commandArgs })
+    if ($commandArgs -match '-EncodedCommand\s+([A-Za-z0-9+/=]+)')
+    {
+        $decoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
+        if ($decoded -match '\$resultPath\s*=\s*''([^'']+)''')
+        {
+            @{ Success = $true; Updates = @() } | ConvertTo-Json | Set-Content -LiteralPath $Matches[1] -Encoding UTF8
+        }
+    }
+}
+$null = Get-CodexPackagedStoreUpdateState
+$statusFile = Start-CodexPackagedStoreInstall
+Remove-Item -LiteralPath $statusFile -Force -ErrorAction SilentlyContinue
+if ($script:desktopPackageCalls.Count -ne 2 -or @($script:desktopPackageCalls | Where-Object { $_.Command -ne 'C:\Windows\System32\conhost.exe' -or $_.Args -notmatch '^--headless\s+.*-WindowStyle Hidden' }).Count -gt 0)
+{
+    throw 'Packaged Store helper did not run through headless conhost'
+}
+
+$script:codexWasStopped = $false
+$script:startedInteractiveApp = $false
+function Get-CodexDesktopProcesses
+{
+    return @()
+}
+function Start-Process
+{
+    $script:startedInteractiveApp = $true
+}
+Stop-CodexProcess
+if ($script:startedInteractiveApp)
+{
+    throw 'Stop-CodexProcess opened a visible application window'
+}
+Write-Output 'PASS: dispatcher publishes a structured version result after updating the selected component, stderr warnings do not fail exit 0, headless Store helpers'
