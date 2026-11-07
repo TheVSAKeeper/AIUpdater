@@ -1,7 +1,7 @@
 ﻿#requires -Version 7.0
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-$fixture = Join-Path $projectRoot "artifacts\release-check\$([guid]::NewGuid().ToString('N'))"
+$fixture = Join-Path ([IO.Path]::GetTempPath()) "aiu-release-check-$([guid]::NewGuid().ToString('N'))"
 $fixtureBuild = Join-Path $fixture 'build'
 New-Item -ItemType Directory -Path $fixtureBuild -Force | Out-Null
 foreach ($name in @('release-info.ps1', 'bump-version.ps1'))
@@ -63,4 +63,5 @@ Assert-Rejected { & $infoScript } '*непустой раздел*'
 Set-Fixture '1' $notes
 & $bumpScript -Version 3 | Out-Null
 if ((& $infoScript).Version -ne '3') { throw 'Явный номер не принят' }
+Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
 Write-Output 'PASS: vN and vN.P, next/patch/explicit increments, rollback and repeat rejection, required unique notes, invalid numbers, no changes on rejection'

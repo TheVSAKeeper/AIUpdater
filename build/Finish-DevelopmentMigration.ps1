@@ -56,6 +56,8 @@ function Assert-NoBlockingProcesses
     }
 }
 
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 if ($env:USERPROFILE -ne 'C:\Users\admin') { throw 'Сценарий подготовлен только для профиля C:\Users\admin.' }
 if (-not (Test-Path -LiteralPath $nativePowerShell)) { throw 'Отсутствует штатный PowerShell 7.' }
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())

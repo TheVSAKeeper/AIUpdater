@@ -10,7 +10,6 @@ $desktopDirectory = [Environment]::GetFolderPath('DesktopDirectory')
 $logDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AIUpdater\Logs'
 $backupDirectory = Join-Path $projectRoot 'artifacts\desktop-previous'
 
-# Publish to a fresh directory so an open application can keep running.
 & dotnet publish (Join-Path $projectRoot 'src\AIUpdater\AIUpdater.csproj') -c Release --self-contained false -o $publishDirectory
 if ($LASTEXITCODE -ne 0)
 {
@@ -46,7 +45,6 @@ pause
 "@
 [IO.File]::WriteAllText((Join-Path $desktopDirectory 'Обновить AIUpdater.cmd'), $command + "`r`n",[Text.UTF8Encoding]::new($false))
 
-# Preserve old desktop files while moving them out of the desktop.
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 foreach ($logName in @('Update-Codex-last.log', 'Update-Codex-OpenAI-last.log', 'Update-Codex-Anthropic-last.log', 'Update-Codex-Google-last.log'))
 {

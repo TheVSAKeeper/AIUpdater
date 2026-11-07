@@ -1,25 +1,5 @@
 ﻿param(
-    [ValidateSet(
-        'Codex desktop',
-        'Active Codex CLI',
-        'Codex npm package',
-        'Codex plugins',
-        'Claude Desktop',
-        'Claude Code',
-        'Claude npm package',
-        'Claude plugins',
-        'Antigravity Desktop',
-        'Antigravity CLI',
-        'DSH',
-        'Windows Terminal',
-        'PowerShell 7',
-        'Docker Desktop',
-        '.NET SDK 10',
-        'Git',
-        'Node.js LTS'
-    )]
     [string]$OnlyStage,
-    [ValidateSet('OpenAI', 'Anthropic', 'Google', 'DeepSeek', 'Разработка')]
     [string]$Vendor,
     [switch]$CheckOnly,
     [ValidateSet('Update', 'Install', 'Uninstall')]
@@ -33,11 +13,26 @@ if ($Action -ne 'Update' -and (-not $OnlyStage -or $CheckOnly))
     throw 'Install and Uninstall require OnlyStage and cannot be combined with CheckOnly'
 }
 
-$productId = '9PLM9XGG6VKS'
-$packageName = 'OpenAI.Codex'
-$appId = 'OpenAI.Codex_2p2nqsd0c76g0!App'
-$claudeDesktopPackageId = 'Anthropic.Claude'
-$claudeDesktopAppId = 'Claude_pzs8sxrjxfjjc!Claude'
+. (Join-Path $PSScriptRoot 'Manage-Components.ps1')
+. (Join-Path $PSScriptRoot 'Check-Updates.ps1')
+
+if ($OnlyStage -and -not (Get-StageDefinitions).Contains($OnlyStage))
+{
+    throw "Unknown stage: $OnlyStage"
+}
+if ($Vendor -and $Vendor -notin @((Get-StageDefinitions).Values | ForEach-Object { $_.Vendor }))
+{
+    throw "Unknown vendor: $Vendor"
+}
+
+$codexDesktopStage = Get-StageDefinition 'Codex desktop'
+$claudeDesktopStage = Get-StageDefinition 'Claude Desktop'
+$productId = $codexDesktopStage.PackageId
+$packageName = $codexDesktopStage.AppxName
+$appId = $codexDesktopStage.AppId
+$claudeDesktopPackageId = $claudeDesktopStage.PackageId
+$claudeDesktopAppId = $claudeDesktopStage.AppId
+$script:UpdateServiceNames = @('BITS', 'wuauserv', 'InstallService', 'ClipSVC', 'AppXSvc')
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8NoBom
 $OutputEncoding = $utf8NoBom
@@ -49,51 +44,12 @@ function Test-Admin
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-if (-not $CheckOnly -and -not (Test-Admin))
-{
-    $arguments = @(
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', "`"$PSCommandPath`""
-    )
-    if ($OnlyStage)
-    {
-        $arguments += @('-OnlyStage', "`"$OnlyStage`"")
-    }
-    if ($Vendor)
-    {
-        $arguments += @('-Vendor', "`"$Vendor`"")
-    }
-    $arguments += @('-Action', $Action)
-    $arguments += @('-LogPath', "`"$LogPath`"")
-    Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden
-    exit
-}
-
-Set-Content -LiteralPath $logPath -Encoding UTF8 -Value "Codex update run: $( Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz' )"
-
 function Write-Log
 {
     param([string]$Message)
     $line = "[$( Get-Date -Format 'HH:mm:ss' )] $Message"
     Add-Content -LiteralPath $logPath -Encoding UTF8 -Value $line
     Write-Host $line
-}
-
-function Get-CodexPackage
-{
-    Get-AppxPackage -Name $packageName -ErrorAction SilentlyContinue
-}
-
-function Get-CodexVersion
-{
-    $pkg = Get-CodexPackage
-    if ($null -eq $pkg)
-    {
-        return $null
-    }
-
-    return [version]$pkg.Version
 }
 
 function Invoke-LoggedCommand
@@ -198,7 +154,6 @@ function Invoke-CommandCapture
     {
         return Invoke-CommandCaptureCore @PSBoundParameters
     }
-    # Vendor processes share winget's source database and initialization state.
     $mutex = [Threading.Mutex]::new($false, 'Local\AIUpdater.Winget')
     $acquired = $false
     try
@@ -314,9 +269,8 @@ function Invoke-CommandCaptureCore
 function Restart-UpdateServices
 {
     Write-Log 'Restarting Store and Windows Update services'
-    $serviceNames = @('BITS', 'wuauserv', 'InstallService', 'ClipSVC', 'AppXSvc')
 
-    foreach ($serviceName in $serviceNames)
+    foreach ($serviceName in $script:UpdateServiceNames)
     {
         $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
         if ($null -eq $service)
@@ -347,9 +301,8 @@ function Restart-UpdateServices
 function Ensure-UpdateServicesRunning
 {
     Write-Log 'Checking Store and Windows Update services'
-    $serviceNames = @('BITS', 'wuauserv', 'InstallService', 'ClipSVC', 'AppXSvc')
 
-    foreach ($serviceName in $serviceNames)
+    foreach ($serviceName in $script:UpdateServiceNames)
     {
         $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
         if ($null -eq $service)
@@ -399,53 +352,61 @@ function Request-StoreUpdateRefresh
     }
 }
 
-function Write-AppxEvents
+function Write-RecentPackageEvents
 {
-    Write-Log 'Recent AppX events for Codex'
-    $events = Get-WinEvent -LogName 'Microsoft-Windows-AppXDeploymentServer/Operational' -MaxEvents 80 -ErrorAction SilentlyContinue |
+    param(
+        [string]$Header,
+        [string]$LogName,
+        [int]$MaxEvents,
+        [int]$First,
+        [string]$Pattern,
+        [string]$Prefix,
+        [string]$EmptyMessage
+    )
+
+    Write-Log $Header
+    $events = Get-WinEvent -LogName $LogName -MaxEvents $MaxEvents -ErrorAction SilentlyContinue |
         Where-Object {
-            $_.TimeCreated -gt (Get-Date).AddMinutes(-20) -and
-                ($_.Message -match 'OpenAI\.Codex|9PLM9XGG6VKS|0x[0-9a-fA-F]+|Codex')
+            $_.TimeCreated -gt (Get-Date).AddMinutes(-20) -and $_.Message -match $Pattern
         } |
-        Select-Object -First 20
+        Select-Object -First $First
 
     if ($null -eq $events)
     {
-        Write-Log 'No recent AppX events found'
-    }
-    else
-    {
-        foreach ($event in $events)
-        {
-            $message = ($event.Message -replace '\s+', ' ').Trim()
-            Write-Log "AppX event $( $event.Id ) $( $event.LevelDisplayName ) $( $event.TimeCreated ): $message"
-        }
-    }
-
-    Write-StoreEvents
-}
-
-function Write-StoreEvents
-{
-    Write-Log 'Recent Microsoft Store events for Codex'
-    $events = Get-WinEvent -LogName 'Microsoft-Windows-Store/Operational' -MaxEvents 300 -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.TimeCreated -gt (Get-Date).AddMinutes(-20) -and
-                $_.Message -match 'OpenAI\.Codex|9PLM9XGG6VKS'
-        } |
-        Select-Object -First 40
-
-    if ($null -eq $events)
-    {
-        Write-Log 'No recent Microsoft Store events found'
+        Write-Log $EmptyMessage
         return
     }
 
     foreach ($event in $events)
     {
         $message = ($event.Message -replace '\s+', ' ').Trim()
-        Write-Log "Store event $( $event.Id ) $( $event.LevelDisplayName ) $( $event.TimeCreated ): $message"
+        Write-Log "$Prefix event $( $event.Id ) $( $event.LevelDisplayName ) $( $event.TimeCreated ): $message"
     }
+}
+
+function Write-AppxEvents
+{
+    Write-RecentPackageEvents `
+        -Header 'Recent AppX events for Codex' `
+        -LogName 'Microsoft-Windows-AppXDeploymentServer/Operational' `
+        -MaxEvents 80 `
+        -First 20 `
+        -Pattern "$([regex]::Escape($packageName))|$([regex]::Escape($productId))|0x[0-9a-fA-F]+|Codex" `
+        -Prefix 'AppX' `
+        -EmptyMessage 'No recent AppX events found'
+    Write-StoreEvents
+}
+
+function Write-StoreEvents
+{
+    Write-RecentPackageEvents `
+        -Header 'Recent Microsoft Store events for Codex' `
+        -LogName 'Microsoft-Windows-Store/Operational' `
+        -MaxEvents 300 `
+        -First 40 `
+        -Pattern "$([regex]::Escape($packageName))|$([regex]::Escape($productId))" `
+        -Prefix 'Store' `
+        -EmptyMessage 'No recent Microsoft Store events found'
 }
 
 function Invoke-CodexStoreAction
@@ -461,7 +422,7 @@ function Invoke-CodexStoreAction
         $Action,
         '--id', $productId,
         '--exact',
-        '--source', 'msstore',
+        '--source', $codexDesktopStage.Source,
         '--accept-source-agreements',
         '--accept-package-agreements',
         '--disable-interactivity'
@@ -474,272 +435,6 @@ function Invoke-CodexStoreAction
     Invoke-LoggedCommand -FilePath 'winget' -Arguments $arguments
 
     Write-Log "winget $Action attempt $Attempt completed"
-}
-
-function Test-Tool
-{
-    param([string]$Name)
-    return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
-}
-
-function ConvertTo-VersionOrNull
-{
-    param([string]$Text)
-
-    if ( [string]::IsNullOrWhiteSpace($Text))
-    {
-        return $null
-    }
-
-    if ($Text -match '(?<![0-9.])([0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)(?![0-9.])')
-    {
-        return $Matches[1]
-    }
-
-    return $null
-}
-
-function Get-NpmReleaseChannel
-{
-    param([string]$Version)
-    if ($Version -match '^\d+(?:\.\d+){1,3}-([A-Za-z][A-Za-z0-9-]*)(?:\.|\+|$)')
-    {
-        return $Matches[1]
-    }
-    if ($Version -match '^\d+(?:\.\d+){1,3}-')
-    {
-        throw "Cannot infer npm release channel from $Version"
-    }
-    return 'latest'
-}
-
-function Compare-PackageVersions
-{
-    param([string]$Installed, [string]$Available)
-    $pattern = '^(?<core>\d+(?:\.\d+){1,3})(?:-(?<pre>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
-    $left = [regex]::Match($Installed, $pattern)
-    $right = [regex]::Match($Available, $pattern)
-    if (-not $left.Success -or -not $right.Success)
-    {
-        throw 'Invalid package version'
-    }
-    $leftCore = @($left.Groups['core'].Value.Split('.'))
-    $rightCore = @($right.Groups['core'].Value.Split('.'))
-    for ($i = 0; $i -lt 4; $i++) {
-        $a = if ($i -lt $leftCore.Count)
-        {
-            [decimal]$leftCore[$i]
-        }
-        else
-        {
-            0
-        }
-        $b = if ($i -lt $rightCore.Count)
-        {
-            [decimal]$rightCore[$i]
-        }
-        else
-        {
-            0
-        }
-        if ($a -ne $b)
-        {
-            return $a.CompareTo($b)
-        }
-    }
-    $leftPre = $left.Groups['pre'].Value
-    $rightPre = $right.Groups['pre'].Value
-    if (-not $leftPre -and -not $rightPre)
-    {
-        return 0
-    }
-    if (-not $leftPre)
-    {
-        return 1
-    }
-    if (-not $rightPre)
-    {
-        return -1
-    }
-    $aParts = $leftPre.Split('.')
-    $bParts = $rightPre.Split('.')
-    for ($i = 0; $i -lt [Math]::Min($aParts.Count, $bParts.Count); $i++) {
-        $a = $aParts[$i]
-        $b = $bParts[$i]
-        $aNumeric = $a -match '^\d+$'
-        $bNumeric = $b -match '^\d+$'
-        if ($aNumeric -and $bNumeric)
-        {
-            $a = $a.TrimStart('0'); $b = $b.TrimStart('0')
-            $comparison = $a.Length.CompareTo($b.Length)
-            if ($comparison -eq 0)
-            {
-                $comparison = [string]::CompareOrdinal($a, $b)
-            }
-        }
-        elseif ($aNumeric -ne $bNumeric)
-        {
-            $comparison = if ($aNumeric)
-            {
-                -1
-            }
-            else
-            {
-                1
-            }
-        }
-        else
-        {
-            $comparison = [string]::CompareOrdinal($a, $b)
-        }
-        if ($comparison -ne 0)
-        {
-            return [Math]::Sign($comparison)
-        }
-    }
-    return $aParts.Count.CompareTo($bParts.Count)
-}
-
-function Get-ToolVersion
-{
-    param([string]$ToolName)
-
-    if (-not (Test-Tool $ToolName))
-    {
-        Write-Log "$ToolName not found"
-        return $null
-    }
-
-    $result = Invoke-CommandCapture -FilePath $ToolName -Arguments @('--version') -NoLogCommand
-    if ($result.ExitCode -ne 0)
-    {
-        Write-Log "$ToolName --version failed with exit code $( $result.ExitCode )"
-        return $null
-    }
-
-    Write-Log "$ToolName version output: $( $result.Text )"
-    return ConvertTo-VersionOrNull $result.Text
-}
-
-function Get-NpmLatestVersion
-{
-    param([string]$PackageName, [string]$InstalledVersion)
-
-    if (-not (Test-Tool 'npm'))
-    {
-        Write-Log 'npm not found'
-        return $null
-    }
-
-    $channel = if ($PackageName -eq '@deepseek-ai/dsh') { 'latest' } else { Get-NpmReleaseChannel $InstalledVersion }
-    Write-Log "Checking npm release channel for ${PackageName}: $channel"
-    $field = if ($channel -eq 'latest')
-    {
-        'version'
-    }
-    else
-    {
-        "dist-tags.$channel"
-    }
-    $result = Invoke-CommandCapture -FilePath 'npm' -Arguments @('view', $PackageName, $field, '--silent') -NoLogCommand
-    if ($result.ExitCode -ne 0)
-    {
-        Write-Log "npm latest lookup failed for ${PackageName}: exit code $( $result.ExitCode )"
-        return $null
-    }
-
-    $latest = ConvertTo-VersionOrNull $result.Text
-    if ($null -eq $latest)
-    {
-        Write-Log "npm latest lookup returned an unparsable version for ${PackageName}: $( $result.Text )"
-    }
-    elseif ($PackageName -ne '@deepseek-ai/dsh' -and (Get-NpmReleaseChannel $latest) -ne $channel)
-    {
-        Write-Log "npm channel $channel returned a different release channel; comparison unavailable"
-        return $null
-    }
-    else
-    {
-        Write-Log "Latest npm version for ${PackageName} (${channel}): $latest"
-    }
-
-    return $latest
-}
-
-function Get-NpmGlobalPackageState
-{
-    param([string]$PackageName)
-
-    $state = [pscustomobject]@{ Status = 'ERROR'; Version = $null; Detail = '' }
-    if (-not (Test-Tool 'npm'))
-    {
-        $state.Detail = 'Для проверки глобального пакета требуется npm'
-        return $state
-    }
-
-    try
-    {
-        $result = Invoke-CommandCapture -FilePath 'npm' -Arguments @('list', '-g', '--depth=0', '--json', '--silent') -NoLogCommand
-        if ($result.ExitCode -ne 0)
-        {
-            Write-Log "npm global list failed: $( $result.ExitCode ): $( $result.Text )"
-            $state.Detail = "Не удалось прочитать глобальные пакеты npm (код $( $result.ExitCode ))"
-            return $state
-        }
-        $data = $result.Text | ConvertFrom-Json
-        if ($data -isnot [pscustomobject] -or $data.PSObject.Properties['error'] -or
-            -not ($data.PSObject.Properties['dependencies'] -or $data.PSObject.Properties['name'] -or $data.PSObject.Properties['path']))
-        {
-            throw 'Unexpected npm list response'
-        }
-        $dependencies = $data.PSObject.Properties['dependencies']
-        if ($null -ne $dependencies -and $dependencies.Value -isnot [pscustomobject])
-        {
-            throw 'Expected a dependencies object'
-        }
-        $dependency = if ($null -ne $dependencies)
-        {
-            $dependencies.Value.PSObject.Properties[$PackageName]
-        }
-        else
-        {
-            $null
-        }
-        if ($null -eq $dependency)
-        {
-            $state.Status = 'NOT_INSTALLED'
-            $state.Detail = 'Глобальный npm-пакет не установлен в активном npm-каталоге'
-            return $state
-        }
-        $version = ConvertTo-VersionOrNull $dependency.Value.version
-        if ($null -eq $version)
-        {
-            $state.Detail = 'Пакет найден, но его установленную версию не удалось прочитать'
-            return $state
-        }
-
-        $state.Status = 'INSTALLED'
-        $state.Version = $version
-    }
-    catch
-    {
-        Write-Log "Failed to parse npm list output for ${PackageName}: $( $_.Exception.Message )"
-        $state.Detail = 'Не удалось выполнить проверку или разобрать список глобальных пакетов npm'
-    }
-    return $state
-}
-
-function Get-NpmGlobalPackageVersion
-{
-    param([string]$PackageName)
-
-    $state = Get-NpmGlobalPackageState $PackageName
-    if ($state.Status -eq 'INSTALLED')
-    {
-        return $state.Version
-    }
-    Write-Log "${PackageName}: $( $state.Detail )"
-    return $null
 }
 
 function Get-CodexDesktopProcesses
@@ -891,25 +586,21 @@ function Start-CodexProcess
     }
 }
 
-function Get-CodexDesktopWingetState
+function Get-StageWingetState
 {
+    param([string]$Stage, [string]$Label = $Stage)
     if (-not (Test-Tool 'winget'))
     {
-        Write-Log 'winget not found; ChatGPT/Codex desktop update skipped'
+        Write-Log "winget not found; $Label update skipped"
         return $null
     }
 
-    $result = Invoke-CommandCapture -FilePath 'winget' -Arguments @(
-        'list',
-        '--id', $productId,
-        '--exact',
-        '--source', 'msstore',
-        '--accept-source-agreements'
-    ) -NoLogCommand
-
-    if ($result.ExitCode -ne 0)
+    $definition = Get-StageDefinition $Stage
+    $state = Get-WingetPackageState -PackageId $definition.PackageId -Source $definition.Source
+    if ($state.Status -in @('NOT_INSTALLED', 'COMMAND_FAILED'))
     {
-        if ($null -eq (Get-CodexPackage))
+        $isAbsent = if ($definition.Kind -eq 'StoreDesktop') { $null -eq (Get-CodexPackage) } else { $state.Status -eq 'NOT_INSTALLED' }
+        if ($isAbsent)
         {
             return [pscustomobject]@{
                 IsInstalled = $false
@@ -918,31 +609,41 @@ function Get-CodexDesktopWingetState
             }
         }
 
-        Write-Log "Could not read ChatGPT/Codex desktop version from Microsoft Store: exit code $( $result.ExitCode )"
+        Write-Log "Could not read $Label version from $( $definition.Source ): exit code $( $state.ExitCode )"
         return $null
     }
 
-    foreach ($line in ($result.Text -split "`r?`n"))
+    if ($state.Status -eq 'INSTALLED')
     {
-        if ($line -match "\b$([regex]::Escape($productId) )\s+([0-9]+(?:\.[0-9]+){1,3})(?:\s+([0-9]+(?:\.[0-9]+){1,3}))?(?:\s+msstore)?\s*$")
-        {
-            return [pscustomobject]@{
-                IsInstalled = $true
-                Installed = [version]$Matches[1]
-                Available = if ($Matches[2])
-                {
-                    [version]$Matches[2]
-                }
-                else
-                {
-                    $null
-                }
-            }
+        return [pscustomobject]@{
+            IsInstalled = $true
+            Installed = $state.Installed
+            Available = $state.Available
         }
     }
 
-    Write-Log 'Could not parse ChatGPT/Codex desktop version from winget output'
+    Write-Log "Could not parse $Label version from winget output"
     return $null
+}
+
+function Get-CodexDesktopWingetState
+{
+    return Get-StageWingetState 'Codex desktop' 'ChatGPT/Codex desktop'
+}
+
+function Invoke-CodexDesktopPackageScript
+{
+    param([string]$Script, [switch]$UseSta)
+    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Script))
+    $staSwitch = if ($UseSta) { '-STA ' } else { '' }
+    $invokeArguments = @{
+        PackageFamilyName = $codexDesktopStage.PackageFamilyName
+        AppId = 'App'
+        Command = 'C:\Windows\System32\conhost.exe'
+        Args = "--headless C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden ${staSwitch}-EncodedCommand $encodedCommand"
+        PreventBreakaway = $true
+    }
+    Invoke-CommandInDesktopPackage @invokeArguments | Out-Null
 }
 
 function Get-CodexPackagedStoreUpdateState
@@ -976,15 +677,7 @@ try {
 }
 "@
 
-    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($innerScript))
-    $invokeArguments = @{
-        PackageFamilyName = 'OpenAI.Codex_2p2nqsd0c76g0'
-        AppId = 'App'
-        Command = 'C:\Windows\System32\conhost.exe'
-        Args = "--headless C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $encodedCommand"
-        PreventBreakaway = $true
-    }
-    Invoke-CommandInDesktopPackage @invokeArguments | Out-Null
+    Invoke-CodexDesktopPackageScript -Script $innerScript
 
     $deadline = (Get-Date).AddSeconds(30)
     while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline)
@@ -1062,8 +755,6 @@ try {
         exit
     }
 
-    # PowerShell exposes the WinRT result as a COM collection. Rebuild it as the
-    # strongly typed IEnumerable required by the Store installation method.
     `$typedListType = [System.Collections.Generic.List``1].MakeGenericType(`$updateType)
     `$typedUpdates = [Activator]::CreateInstance(`$typedListType)
     foreach (`$update in `$updates) {
@@ -1139,16 +830,7 @@ try {
 }
 "@
 
-    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($innerScript))
-    $invokeArguments = @{
-        PackageFamilyName = 'OpenAI.Codex_2p2nqsd0c76g0'
-        AppId = 'App'
-        Command = 'C:\Windows\System32\conhost.exe'
-        Args = "--headless C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -STA -EncodedCommand $encodedCommand"
-        PreventBreakaway = $true
-    }
-    Invoke-CommandInDesktopPackage @invokeArguments | Out-Null
-
+    Invoke-CodexDesktopPackageScript -Script $innerScript -UseSta
     return $statusPath
 }
 
@@ -1188,7 +870,6 @@ function Wait-CodexPackagedStoreInstall
                 }
                 catch
                 {
-                    # The helper can replace the status file while it is being read.
                     continue
                 }
 
@@ -1389,56 +1070,7 @@ function Update-CodexDesktop
 
 function Get-ClaudeDesktopWingetState
 {
-    if (-not (Test-Tool 'winget'))
-    {
-        Write-Log 'winget not found; Claude Desktop update skipped'
-        return $null
-    }
-
-    $result = Invoke-CommandCapture -FilePath 'winget' -Arguments @(
-        'list',
-        '--id', $claudeDesktopPackageId,
-        '--exact',
-        '--source', 'winget',
-        '--accept-source-agreements'
-    ) -NoLogCommand
-
-    if ($result.ExitCode -ne 0)
-    {
-        if ($result.ExitCode -eq -1978335212)
-        {
-            return [pscustomobject]@{
-                IsInstalled = $false
-                Installed = $null
-                Available = $null
-            }
-        }
-
-        Write-Log "Could not read Claude Desktop version from winget: exit code $( $result.ExitCode )"
-        return $null
-    }
-
-    foreach ($line in ($result.Text -split "`r?`n"))
-    {
-        if ($line -match "\b$([regex]::Escape($claudeDesktopPackageId) )\s+([0-9]+(?:\.[0-9]+){1,3})(?:\s+([0-9]+(?:\.[0-9]+){1,3}))?\s+")
-        {
-            return [pscustomobject]@{
-                IsInstalled = $true
-                Installed = [version]$Matches[1]
-                Available = if ($Matches[2])
-                {
-                    [version]$Matches[2]
-                }
-                else
-                {
-                    $null
-                }
-            }
-        }
-    }
-
-    Write-Log 'Claude Desktop is not installed according to winget'
-    return $null
+    return Get-StageWingetState 'Claude Desktop'
 }
 
 function Update-ClaudeDesktop
@@ -1468,7 +1100,7 @@ function Update-ClaudeDesktop
         'upgrade',
         '--id', $claudeDesktopPackageId,
         '--exact',
-        '--source', 'winget',
+        '--source', $claudeDesktopStage.Source,
         '--accept-source-agreements',
         '--accept-package-agreements',
         '--disable-interactivity'
@@ -1485,18 +1117,18 @@ function Update-CodexPrerelease
 {
     param([string]$Version)
     $command = Get-Command codex -ErrorAction Stop
+    $definition = Get-StageDefinition 'Active Codex CLI'
     if (Test-Tool 'npm')
     {
         $prefix = Invoke-CommandCapture 'npm' @('prefix', '-g') -NoLogCommand
         if ($prefix.ExitCode -eq 0 -and [IO.Path]::GetDirectoryName($command.Source) -eq $prefix.Text.Trim())
         {
             Stop-CodexProcess
-            Invoke-LoggedCommand 'npm' @('install', '-g', "@openai/codex@$Version")
+            Invoke-LoggedCommand 'npm' @('install', '-g', "$($definition.NpmPackage)@$Version")
             return
         }
     }
-    $standalonePath = Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin\codex.exe'
-    if ([IO.Path]::GetFullPath($command.Source) -ne [IO.Path]::GetFullPath($standalonePath))
+    if ([IO.Path]::GetFullPath($command.Source) -ne [IO.Path]::GetFullPath($definition.Path))
     {
         throw 'Cannot safely update this prerelease CLI installation; use its original installer with the required release version'
     }
@@ -1504,7 +1136,7 @@ function Update-CodexPrerelease
     $previousNonInteractive = $env:CODEX_NON_INTERACTIVE
     try
     {
-        Invoke-WebRequest 'https://chatgpt.com/codex/install.ps1' -OutFile $installer -UseBasicParsing
+        Invoke-WebRequest $definition.Url -OutFile $installer -UseBasicParsing
         $env:CODEX_NON_INTERACTIVE = '1'
         Stop-CodexProcess
         Invoke-LoggedCommand 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer, '-Release', $Version)
@@ -1528,7 +1160,7 @@ function Update-ActiveCodexCli
     }
 
     $currentVersion = Get-ToolVersion 'codex'
-    $latestVersion = Get-NpmLatestVersion '@openai/codex' $currentVersion
+    $latestVersion = Get-NpmLatestVersion (Get-StageDefinition 'Active Codex CLI').NpmPackage $currentVersion
     $channel = Get-NpmReleaseChannel $currentVersion
     if ($channel -ne 'latest' -and $null -eq $latestVersion)
     {
@@ -1618,7 +1250,7 @@ function Update-ClaudeCode
     }
 
     $currentVersion = Get-ToolVersion 'claude'
-    $latestVersion = Get-NpmLatestVersion '@anthropic-ai/claude-code' $currentVersion
+    $latestVersion = Get-NpmLatestVersion (Get-StageDefinition 'Claude Code').NpmPackage $currentVersion
 
     if ($null -ne $currentVersion -and $null -ne $latestVersion -and (Compare-PackageVersions $currentVersion $latestVersion) -ge 0)
     {
@@ -1771,15 +1403,7 @@ function Update-ClaudePlugins
 
 function Update-AntigravityCli
 {
-    $command = Get-Command agy -ErrorAction SilentlyContinue
-    $toolPath = if ($command)
-    {
-        $command.Source
-    }
-    else
-    {
-        Join-Path $env:LOCALAPPDATA 'agy\bin\agy.exe'
-    }
+    $toolPath = Get-AgyExecutablePath
     if (-not (Test-Path -LiteralPath $toolPath))
     {
         Write-Log 'Antigravity CLI (agy) not installed; update skipped'
@@ -1790,33 +1414,38 @@ function Update-AntigravityCli
 
 function Update-AntigravityDesktop
 {
-    if (-not (Test-Tool 'winget'))
+    $definition = Get-StageDefinition 'Antigravity Desktop'
+    Invoke-WingetUpgrade -Stage 'Antigravity Desktop' -PackageId $definition.PackageId -Source $definition.Source
+}
+
+function Invoke-StageUpdate
+{
+    param([string]$Stage)
+    $definition = Get-StageDefinition $Stage
+    switch ($Stage)
     {
-        throw 'winget not found; cannot check Antigravity Desktop updates'
-    }
-    $result = Invoke-CommandCapture -FilePath 'winget' -Arguments @(
-        'list', '--id', 'Google.Antigravity', '--exact', '--disable-interactivity', '--accept-source-agreements'
-    ) -NoLogCommand
-    if ($result.ExitCode -eq -1978335212)
-    {
-        Write-Log 'Antigravity Desktop not installed; update skipped'
-        return
-    }
-    if ($result.ExitCode -ne 0)
-    {
-        throw "winget list failed with exit code $( $result.ExitCode ): $( $result.Text )"
-    }
-    $result = Invoke-CommandCapture -FilePath 'winget' -Arguments @(
-        'upgrade', '--id', 'Google.Antigravity', '--exact', '--source', 'winget',
-        '--accept-source-agreements', '--accept-package-agreements', '--disable-interactivity'
-    )
-    if ($result.ExitCode -eq -1978335189)
-    {
-        Write-Log 'Antigravity Desktop is already up to date'
-    }
-    elseif ($result.ExitCode -ne 0)
-    {
-        throw "Antigravity Desktop upgrade failed with exit code $( $result.ExitCode )"
+        'Codex desktop' { Update-CodexDesktop }
+        'Active Codex CLI' { Update-ActiveCodexCli }
+        'Codex plugins' { Update-CodexPlugins }
+        'Claude Desktop' { Update-ClaudeDesktop }
+        'Claude Code' { Update-ClaudeCode }
+        'Claude plugins' { Update-ClaudePlugins }
+        'Antigravity Desktop' { Update-AntigravityDesktop }
+        'Antigravity CLI' { Update-AntigravityCli }
+        default {
+            if ($definition.Kind -eq 'NpmGlobal')
+            {
+                Update-NpmGlobalPackage -PackageName $definition.NpmPackage -DisplayName $definition.DisplayName
+            }
+            elseif ($definition.Kind -eq 'Development')
+            {
+                Update-DevelopmentTool $Stage
+            }
+            else
+            {
+                throw "Unsupported update stage: $Stage"
+            }
+        }
     }
 }
 
@@ -1838,7 +1467,7 @@ function Invoke-UpdateStep
         $script:HadFailure = $true
         $script:FailureCount++
         Write-Log "$Name failed: $( $_.Exception.Message )"
-        if ($CheckOnly)
+        if ($script:CheckOnly -or $CheckOnly)
         {
             Write-CheckResult $Name 'ERROR' $_.Exception.Message -Info $_.Exception.Message
         }
@@ -1857,133 +1486,143 @@ function Invoke-UpdateStep
     }
 }
 
-try
+function Invoke-UpdaterMain
 {
-    . (Join-Path $PSScriptRoot 'Check-Updates.ps1')
-    . (Join-Path $PSScriptRoot 'Manage-Components.ps1')
-    if ($CheckOnly)
-    {
-        Write-Log 'Check-only mode: no installations, marketplace refreshes or application restarts'
-    }
-    $script:codexWasStopped = $false
-    $script:claudeDesktopWasStopped = $false
-    $script:HadFailure = $false
-    $script:FailureCount = 0
+    param(
+        [string]$OnlyStage = '',
+        [string]$Vendor = '',
+        [switch]$CheckOnly,
+        [string]$Action = 'Update',
+        [switch]$NoExit
+    )
 
-    $steps = [ordered]@{
-        'Codex desktop' = { Update-CodexDesktop }
-        'Active Codex CLI' = { Update-ActiveCodexCli }
-        'Codex npm package' = { Update-NpmGlobalPackage -PackageName '@openai/codex' -DisplayName 'Codex CLI' }
-        'Codex plugins' = { Update-CodexPlugins }
-        'Claude Desktop' = { Update-ClaudeDesktop }
-        'Claude Code' = { Update-ClaudeCode }
-        'Claude npm package' = { Update-NpmGlobalPackage -PackageName '@anthropic-ai/claude-code' -DisplayName 'Claude Code' }
-        'Claude plugins' = { Update-ClaudePlugins }
-        'Antigravity Desktop' = { Update-AntigravityDesktop }
-        'Antigravity CLI' = { Update-AntigravityCli }
-        'DSH' = { Update-NpmGlobalPackage -PackageName '@deepseek-ai/dsh' -DisplayName 'DSH' }
-    }
+    $script:CheckOnly = [bool]$CheckOnly
 
-    $developmentPackages = Get-DevelopmentPackages
-    foreach ($stage in $developmentPackages.Keys)
+    try
     {
-        $steps[$stage] = { Update-DevelopmentTool $step.Key }
-    }
+        if ($CheckOnly)
+        {
+            Write-Log 'Check-only mode: no installations, marketplace refreshes or application restarts'
+        }
+        $script:codexWasStopped = $false
+        $script:claudeDesktopWasStopped = $false
+        $script:HadFailure = $false
+        $script:FailureCount = 0
 
-    foreach ($step in $steps.GetEnumerator())
-    {
-        $stepVendor = if ($step.Key -match 'Codex')
+        foreach ($entry in (Get-StageDefinitions).GetEnumerator())
         {
-            'OpenAI'
-        }
-        elseif ($step.Key -match 'Claude')
-        {
-            'Anthropic'
-        }
-        elseif ($step.Key -eq 'DSH')
-        {
-            'DeepSeek'
-        }
-        elseif ($developmentPackages.Contains($step.Key))
-        {
-            'Разработка'
-        }
-        else
-        {
-            'Google'
-        }
-        if ((-not $OnlyStage -or $step.Key -eq $OnlyStage) -and (-not $Vendor -or $stepVendor -eq $Vendor))
-        {
-            $failureBeforeAction = $script:FailureCount
-            if ($CheckOnly)
+            $stageName = $entry.Key
+            $stageVendor = $entry.Value.Vendor
+            if ((-not $OnlyStage -or $stageName -eq $OnlyStage) -and (-not $Vendor -or $stageVendor -eq $Vendor))
             {
-                $stageName = $step.Key
-                Invoke-UpdateStep -Name $stageName -ScriptBlock { Invoke-CheckStage $stageName }
-            }
-            elseif ($Action -ne 'Update')
-            {
-                $stageName = $step.Key
-                Invoke-UpdateStep -Name $stageName -ScriptBlock { Invoke-ComponentAction -Stage $stageName -Action $Action }
-            }
-            else
-            {
-                Invoke-UpdateStep -Name $step.Key -ScriptBlock $step.Value
-            }
-            if (-not $CheckOnly)
-            {
-                if ($Action -eq 'Uninstall' -and $script:FailureCount -eq $failureBeforeAction)
+                $failureBeforeAction = $script:FailureCount
+                if ($CheckOnly)
                 {
-                    Write-CheckResult $step.Key 'NOT_INSTALLED' 'Component removed'
+                    Invoke-UpdateStep -Name $stageName -ScriptBlock { Invoke-CheckStage $stageName }
+                }
+                elseif ($Action -ne 'Update')
+                {
+                    Invoke-UpdateStep -Name $stageName -ScriptBlock { Invoke-ComponentAction -Stage $stageName -Action $Action }
                 }
                 else
                 {
-                    try
+                    Invoke-UpdateStep -Name $stageName -ScriptBlock { Invoke-StageUpdate $stageName }
+                }
+                if (-not $CheckOnly)
+                {
+                    if ($Action -eq 'Uninstall' -and $script:FailureCount -eq $failureBeforeAction)
                     {
-                        Invoke-CheckStage $step.Key
+                        Write-CheckResult $stageName 'NOT_INSTALLED' 'Component removed'
                     }
-                    catch
+                    else
                     {
-                        if ($script:FailureCount -eq $failureBeforeAction)
+                        try
                         {
-                            Write-CheckResult $step.Key 'UNKNOWN' "Post-action check failed: $( $_.Exception.Message )"
+                            Invoke-CheckStage $stageName
+                        }
+                        catch
+                        {
+                            if ($script:FailureCount -eq $failureBeforeAction)
+                            {
+                                Write-CheckResult $stageName 'UNKNOWN' "Post-action check failed: $( $_.Exception.Message )"
+                            }
                         }
                     }
                 }
             }
         }
-    }
 
-    if ($script:HadFailure)
+        if ($script:HadFailure)
+        {
+            if ($CheckOnly)
+            {
+                Write-Log 'Done with errors; check-only mode did not change applications'
+            }
+            else
+            {
+                Write-Log 'Done with errors; applications closed for updating will remain closed'
+            }
+            if ($NoExit)
+            {
+                throw 'Updater run completed with errors'
+            }
+            exit 1
+        }
+
+        if (-not $CheckOnly -and $Action -ne 'Uninstall')
+        {
+            Start-CodexProcess
+            Start-ClaudeDesktopProcess
+        }
+        Write-Log 'Done'
+    }
+    catch
     {
+        if ($_.Exception.Message -eq 'Updater run completed with errors')
+        {
+            throw
+        }
+        Write-Log "Run failed: $( $_.Exception.Message )"
+        Write-AppxEvents
         if ($CheckOnly)
         {
-            Write-Log 'Done with errors; check-only mode did not change applications'
+            Write-Log 'Check-only mode did not change applications'
         }
         else
         {
-            Write-Log 'Done with errors; applications closed for updating will remain closed'
+            Write-Log 'Applications closed for updating will remain closed because the update failed'
+        }
+        if ($NoExit)
+        {
+            throw
         }
         exit 1
     }
-
-    if (-not $CheckOnly -and $Action -ne 'Uninstall')
-    {
-        Start-CodexProcess
-        Start-ClaudeDesktopProcess
-    }
-    Write-Log 'Done'
 }
-catch
+
+if ($MyInvocation.InvocationName -ne '.')
 {
-    Write-Log "Run failed: $( $_.Exception.Message )"
-    Write-AppxEvents
-    if ($CheckOnly)
+    if (-not $CheckOnly -and -not (Test-Admin))
     {
-        Write-Log 'Check-only mode did not change applications'
+        $arguments = @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', "`"$PSCommandPath`""
+        )
+        if ($OnlyStage)
+        {
+            $arguments += @('-OnlyStage', "`"$OnlyStage`"")
+        }
+        if ($Vendor)
+        {
+            $arguments += @('-Vendor', "`"$Vendor`"")
+        }
+        $arguments += @('-Action', $Action)
+        $arguments += @('-LogPath', "`"$LogPath`"")
+        Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden
+        exit
     }
-    else
-    {
-        Write-Log 'Applications closed for updating will remain closed because the update failed'
-    }
-    exit 1
+
+    Set-Content -LiteralPath $logPath -Encoding UTF8 -Value "Codex update run: $( Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz' )"
+    Invoke-UpdaterMain -OnlyStage $OnlyStage -Vendor $Vendor -CheckOnly:$CheckOnly -Action $Action
 }

@@ -5,11 +5,7 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
-foreach ($name in @('Get-BlockingProcesses','Assert-NoBlockingProcesses','Invoke-Native'))
-{
-    $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
-    . ([scriptblock]::Create($definition.Extent.Text))
-}
+. $file
 $script:processes = @()
 function Get-Process { param($Name, $ErrorAction) return $script:processes }
 Assert-NoBlockingProcesses
@@ -35,18 +31,25 @@ foreach ($process in @(
 $script:processes = @([pscustomobject]@{ Id = 6; ProcessName = 'pwsh'; Path = 'C:\Program Files\PowerShell\7\pwsh.exe' })
 Assert-NoBlockingProcesses
 Assert-NoBlockingProcesses -IncludePowerShell
-$folder = Join-Path $root '.kc\scratch\development-migration-check'
+$folder = Join-Path ([IO.Path]::GetTempPath()) ('aiu-migration-check-' + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $folder -Force
-$script:log = Join-Path $folder 'native.log'
-function Invoke-FakeNative { $global:LASTEXITCODE = $script:fakeCode; 'fixture output' }
-$script:fakeCode = 0
-if ((Invoke-Native 'Invoke-FakeNative' @()) -ne 'fixture output') { throw 'Потерян stdout команды.' }
-$script:fakeCode = 42
-$rejected = $false
-try { $null = Invoke-Native 'Invoke-FakeNative' @() } catch { $rejected = $true }
-if (-not $rejected) { throw 'Проигнорирован ненулевой exit code.' }
-$script:fakeCode = -1978335189
-$null = Invoke-Native 'Invoke-FakeNative' @() @(0,-1978335189)
+try
+{
+    $script:log = Join-Path $folder 'native.log'
+    function Invoke-FakeNative { $global:LASTEXITCODE = $script:fakeCode; 'fixture output' }
+    $script:fakeCode = 0
+    if ((Invoke-Native 'Invoke-FakeNative' @()) -ne 'fixture output') { throw 'Потерян stdout команды.' }
+    $script:fakeCode = 42
+    $rejected = $false
+    try { $null = Invoke-Native 'Invoke-FakeNative' @() } catch { $rejected = $true }
+    if (-not $rejected) { throw 'Проигнорирован ненулевой exit code.' }
+    $script:fakeCode = -1978335189
+    $null = Invoke-Native 'Invoke-FakeNative' @() @(0,-1978335189)
+}
+finally
+{
+    Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue
+}
 $calls = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() })
 foreach ($forbidden in @('Stop-Process','taskkill','Remove-Item','Remove-ItemProperty','Set-Acl'))
 {

@@ -1,19 +1,6 @@
 ﻿$ErrorActionPreference = 'Stop'
 $scriptsDirectory = Join-Path $PSScriptRoot '..\..\src\AIUpdater\Scripts'
-$tokens = $null
-$parseErrors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile(
-    (Join-Path $scriptsDirectory 'Update-Codex.ps1'), [ref]$tokens, [ref]$parseErrors)
-if ($parseErrors.Count)
-{
-    throw ($parseErrors | Out-String)
-}
-foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false))
-{
-    Invoke-Expression $function.Extent.Text
-}
-. (Join-Path $scriptsDirectory 'Check-Updates.ps1')
-. (Join-Path $scriptsDirectory 'Manage-Components.ps1')
+. (Join-Path $scriptsDirectory 'Update-Codex.ps1')
 $script:messages = [System.Collections.Generic.List[string]]::new()
 $script:hasNpm = $true
 $script:agyExists = $true

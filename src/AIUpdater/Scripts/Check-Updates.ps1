@@ -1,5 +1,4 @@
-﻿# Read-only checks: do not call update functions or refresh plugin marketplaces.
-function Write-CheckResult
+﻿function Write-CheckResult
 {
     param([string]$Stage, [string]$Result, [string]$Detail, $Installed = $null, $Available = $null, [string]$Info = $null)
     Write-Log $Detail
@@ -7,22 +6,8 @@ function Write-CheckResult
     $payload = [ordered]@{
         Stage = $Stage
         Result = $Result
-        Installed = if ($null -eq $Installed)
-        {
-            $null
-        }
-        else
-        {
-            "$Installed"
-        }
-        Available = if ($null -eq $Available)
-        {
-            $null
-        }
-        else
-        {
-            "$Available"
-        }
+        Installed = if ($null -eq $Installed) { $null } else { "$Installed" }
+        Available = if ($null -eq $Available) { $null } else { "$Available" }
         Info = $Info
     } | ConvertTo-Json -Compress
     Write-Log "UI_RESULT $payload"
@@ -53,42 +38,28 @@ function Test-WingetUpdate
         Write-CheckResult $Stage 'ERROR' 'winget is unavailable; versions could not be compared' -Info 'winget недоступен'
         return
     }
-    $result = Invoke-CommandCapture -FilePath 'winget' -Arguments @(
-        'list', '--id', $PackageId, '--exact', '--source', $Source,
-        '--accept-source-agreements', '--disable-interactivity'
-    ) -NoLogCommand
-    if ($result.ExitCode -eq -1978335212)
+    $state = Get-WingetPackageState -PackageId $PackageId -Source $Source
+    switch ($state.Status)
     {
-        Write-CheckResult $Stage 'NOT_INSTALLED' 'Application is not installed'
-        return
-    }
-    if ($result.ExitCode -ne 0)
-    {
-        throw "winget list failed: $( $result.ExitCode ): $( $result.Text )"
-    }
-    foreach ($line in ($result.Text -split "`r?`n"))
-    {
-        if ($line -match "\b$([regex]::Escape($PackageId) )\s+([0-9]+(?:\.[0-9]+){1,3})(?:\s+([0-9]+(?:\.[0-9]+){1,3}))?(?:\s+$([regex]::Escape($Source) ))?\s*$")
-        {
-            $installed = [version]$Matches[1]
-            $available = if ($Matches[2])
+        'NOT_INSTALLED' {
+            Write-CheckResult $Stage 'NOT_INSTALLED' 'Application is not installed'
+        }
+        'COMMAND_FAILED' {
+            throw "winget list failed: $( $state.ExitCode ): $( $state.Text )"
+        }
+        'INSTALLED' {
+            if ($null -eq $state.Available -and $Source -eq 'msstore')
             {
-                [version]$Matches[2]
+                Write-CheckResult $Stage 'UNKNOWN' 'Microsoft Store did not expose an available version in winget list' $state.Installed -Info 'winget list не подтвердил доступную версию Microsoft Store'
+                return
             }
-            else
-            {
-                if ($Source -eq 'msstore')
-                {
-                    Write-CheckResult $Stage 'UNKNOWN' 'Microsoft Store did not expose an available version in winget list' $installed -Info 'winget list не подтвердил доступную версию Microsoft Store'
-                    return
-                }
-                $installed
-            }
-            Compare-CheckVersions $Stage $installed $available
-            return
+            $available = if ($null -ne $state.Available) { $state.Available } else { $state.Installed }
+            Compare-CheckVersions $Stage $state.Installed $available
+        }
+        default {
+            Write-CheckResult $Stage 'ERROR' "Could not parse winget version information: $( $state.Text )" -Info 'Не удалось прочитать версии из ответа winget'
         }
     }
-    Write-CheckResult $Stage 'ERROR' "Could not parse winget version information: $( $result.Text )" -Info 'Не удалось прочитать версии из ответа winget'
 }
 
 function Test-CodexDesktopUpdate
@@ -107,7 +78,8 @@ function Test-CodexDesktopUpdate
         {
             throw $state.Error
         }
-        $updates = @($state.Updates | Where-Object Name -EQ 'OpenAI.Codex')
+        $definition = Get-StageDefinition $Stage
+        $updates = @($state.Updates | Where-Object Name -EQ $definition.AppxName)
         if ($updates.Count -gt 0)
         {
             Write-CheckResult $Stage 'AVAILABLE' "Microsoft Store reports an update. Installed: $installed; available: $( $updates[0].Version )" $installed $updates[0].Version
@@ -137,7 +109,15 @@ function Test-CliUpdate
     param([string]$Stage, [string]$Tool, [string]$PackageName, [switch]$NpmPackage)
     if ($NpmPackage)
     {
-        $state = Get-NpmGlobalPackageState $PackageName
+        try
+        {
+            $state = Get-NpmGlobalPackageState $PackageName
+        }
+        catch
+        {
+            Write-CheckResult $Stage 'ERROR' "Could not inspect global npm packages: $( $_.Exception.Message )" -Info 'Не удалось выполнить проверку или разобрать список глобальных пакетов npm'
+            return
+        }
         if ($state.Status -ne 'INSTALLED')
         {
             Write-CheckResult $Stage $state.Status $state.Detail -Info $state.Detail
@@ -251,13 +231,13 @@ function Test-PluginsUpdate
 function Invoke-CheckStage
 {
     param([string]$Stage)
-    $package = (Get-DevelopmentPackages)[$Stage]
-    if ($package)
+    $definition = Get-StageDefinition $Stage
+    if ($definition.Kind -eq 'Development')
     {
         $installed = $null
         try
         {
-            if ($Stage -eq 'PowerShell 7') { $installed = Get-ToolVersion 'pwsh' }
+            if ($definition.Tool) { $installed = Get-ToolVersion $definition.Tool }
             $owner = Get-DevelopmentToolOwner $Stage
             if ($owner -eq 'missing')
             {
@@ -266,7 +246,7 @@ function Invoke-CheckStage
             }
             if ($owner -eq 'nvm')
             {
-                $installed = Get-ToolVersion 'node'
+                if ($null -eq $installed) { $installed = Get-ToolVersion 'node' }
                 if ($null -eq $installed) { throw 'Could not read the active Node version' }
                 try
                 {
@@ -305,48 +285,25 @@ function Invoke-CheckStage
         }
         return
     }
-    switch ($Stage)
+    switch ($definition.Kind)
     {
-        'Codex desktop' {
+        'StoreDesktop' {
             Test-CodexDesktopUpdate $Stage
         }
-        'Active Codex CLI' {
-            Test-CliUpdate $Stage 'codex' '@openai/codex'
+        'WingetDesktop' {
+            Test-WingetUpdate $Stage $definition.PackageId $definition.Source
         }
-        'Codex npm package' {
-            Test-CliUpdate $Stage 'codex' '@openai/codex' -NpmPackage
+        { $_ -in @('NpmCli', 'NativeCli') } {
+            Test-CliUpdate $Stage $definition.Tool $definition.NpmPackage
         }
-        'Codex plugins' {
-            Test-PluginsUpdate $Stage 'codex'
+        'NpmGlobal' {
+            Test-CliUpdate $Stage $definition.Tool $definition.NpmPackage -NpmPackage
         }
-        'Claude Desktop' {
-            Test-WingetUpdate $Stage 'Anthropic.Claude' 'winget'
+        'Plugins' {
+            Test-PluginsUpdate $Stage $definition.Tool
         }
-        'DSH' {
-            Test-CliUpdate $Stage 'dsh' '@deepseek-ai/dsh' -NpmPackage
-        }
-        'Claude Code' {
-            Test-CliUpdate $Stage 'claude' '@anthropic-ai/claude-code'
-        }
-        'Claude npm package' {
-            Test-CliUpdate $Stage 'claude' '@anthropic-ai/claude-code' -NpmPackage
-        }
-        'Claude plugins' {
-            Test-PluginsUpdate $Stage 'claude'
-        }
-        'Antigravity Desktop' {
-            Test-WingetUpdate $Stage 'Google.Antigravity' 'winget'
-        }
-        'Antigravity CLI' {
-            $command = Get-Command agy -ErrorAction SilentlyContinue
-            $toolPath = if ($command)
-            {
-                $command.Source
-            }
-            else
-            {
-                Join-Path $env:LOCALAPPDATA 'agy\bin\agy.exe'
-            }
+        'AgyCli' {
+            $toolPath = Get-AgyExecutablePath
             if (-not (Test-Path -LiteralPath $toolPath))
             {
                 Write-CheckResult $Stage 'NOT_INSTALLED' 'Antigravity CLI (agy) is not installed'
@@ -382,9 +339,6 @@ function Invoke-CheckStage
                 Write-CheckResult $Stage 'ERROR' "Latest agy version query failed: $( $_.Exception.Message )" $installed -Info 'Не удалось получить доступную версию agy из манифеста'
                 return
             }
-        }
-        default {
-            throw "Unknown stage: $Stage"
         }
     }
 }

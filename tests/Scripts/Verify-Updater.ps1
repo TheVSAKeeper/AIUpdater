@@ -1,18 +1,9 @@
 ﻿$ErrorActionPreference = 'Stop'
 $scriptsDirectory = Join-Path $PSScriptRoot '..\..\src\AIUpdater\Scripts'
-$tokens = $null
-$parseErrors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile(
-    (Join-Path $scriptsDirectory 'Update-Codex.ps1'), [ref]$tokens, [ref]$parseErrors)
-if ($parseErrors.Count)
-{
-    throw ($parseErrors | Out-String)
-}
-# Load function definitions without running installers, elevation or application shutdown.
-foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false))
-{
-    Invoke-Expression $function.Extent.Text
-}
+. (Join-Path $scriptsDirectory 'Update-Codex.ps1')
+$realInvokeCommandCapture = (Get-Item Function:\Invoke-CommandCapture).ScriptBlock
+$realInvokeLoggedCommand = (Get-Item Function:\Invoke-LoggedCommand).ScriptBlock
+$realStopCodexProcess = (Get-Item Function:\Stop-CodexProcess).ScriptBlock
 $script:messages = [System.Collections.Generic.List[string]]::new()
 $script:commands = [System.Collections.Generic.List[string]]::new()
 function Write-Log
@@ -59,7 +50,6 @@ if (-not ($script:messages -match 'project directory no longer exists'))
 $script:wingetExitCode = 0
 Update-AntigravityDesktop
 $script:wingetExitCode = -1978335189
-# Mock list succeeds, while upgrade reports no available update.
 function Invoke-CommandCapture
 {
     param($FilePath, $Arguments)
@@ -106,8 +96,6 @@ if (-not ($script:messages -contains '=== COMPLETED: Claude Code ==='))
 }
 Write-Output 'PASS: missing project skip, valid plugin update, winget outcomes, independent stage results'
 
-. (Join-Path $scriptsDirectory 'Check-Updates.ps1')
-. (Join-Path $scriptsDirectory 'Manage-Components.ps1')
 $script:commands.Clear()
 $script:messages.Clear()
 function Invoke-LoggedCommand
@@ -207,18 +195,7 @@ function Invoke-WebRequest
     return [pscustomobject]@{ Content = '{"version":"2.0.0"}' }
 }
 
-# Exercise the actual dispatcher, including the branch that normally starts applications.
-$CheckOnly = $true
-$Action = 'Update'
-$OnlyStage = $null
-$Vendor = $null
-$dispatch = $ast.EndBlock.Statements | Where-Object {
-    $_ -is [System.Management.Automation.Language.TryStatementAst]
-} | Select-Object -Last 1
-$checkScriptPath = Join-Path $scriptsDirectory 'Check-Updates.ps1'
-$manageScriptPath = Join-Path $scriptsDirectory 'Manage-Components.ps1'
-$dispatchText = $dispatch.Extent.Text.Replace(". (Join-Path `$PSScriptRoot 'Check-Updates.ps1')", '. $checkScriptPath').Replace(". (Join-Path `$PSScriptRoot 'Manage-Components.ps1')", '. $manageScriptPath').Replace('exit 1', 'throw ($script:messages -join "`n")')
-Invoke-Expression $dispatchText
+Invoke-UpdaterMain -CheckOnly -Action 'Update' -NoExit
 $checkResults = @($script:messages | Where-Object { $_ -match '^=== CHECK ' })
 if ($checkResults.Count -ne 17)
 {
@@ -261,14 +238,12 @@ if (($uiResults | Where-Object Stage -EQ 'Codex plugins').Info -ne 'Плагин
     throw 'Incorrect plugin counts'
 }
 $script:messages.Clear()
-$Vendor = 'Разработка'
-Invoke-Expression $dispatchText
+Invoke-UpdaterMain -CheckOnly -Action 'Update' -Vendor 'Разработка' -NoExit
 $developmentResults = @($script:messages | Where-Object { $_ -like 'UI_RESULT *' } | ForEach-Object { $_.Substring(10) | ConvertFrom-Json })
 if ($developmentResults.Count -ne 6 -or @($developmentResults | Where-Object { -not (Get-DevelopmentPackages).Contains($_.Stage) }).Count)
 {
     throw 'Development vendor dispatch crossed the component boundary'
 }
-$Vendor = $null
 $script:messages.Clear()
 $script:pluginTestText = 'invalid json'
 Invoke-CheckStage 'Codex plugins'
@@ -337,9 +312,7 @@ foreach ($case in @(
     }
 }
 
-# Check bounded retry and retain the final failure code for unrelated failures.
-$captureFunction = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-CommandCapture' }, $false)[0]
-Invoke-Expression $captureFunction.Extent.Text
+Set-Item Function:\Invoke-CommandCapture -Value $realInvokeCommandCapture
 function Invoke-CommandCaptureCore
 {
     param($FilePath, $Arguments, $WorkingDirectory, [switch]$NoLogCommand)
@@ -371,7 +344,6 @@ if ($script:captureCount -ne 1 -or $result.ExitCode -ne 123)
 }
 Write-Output 'PASS: winget output with/without source column, initialization retry, failure preservation'
 
-# Lifecycle tests capture commands without installing or removing real software.
 function Invoke-LoggedCommand
 {
     param($FilePath, $Arguments) $script:commands.Add("$FilePath $( $Arguments -join ' ' )")
@@ -452,14 +424,9 @@ if (-not $failed -or $script:commands.Count)
     throw 'CLI from an unknown installation was not protected'
 }
 
-# Verify the dispatcher selects a single component and never restarts a removed app.
 $script:lifecycleExitCode = 0
 $script:commands.Clear()
-$CheckOnly = $false
-$OnlyStage = 'Claude npm package'
-$Vendor = 'Anthropic'
-$Action = 'Uninstall'
-Invoke-Expression $dispatchText
+Invoke-UpdaterMain -Action 'Uninstall' -OnlyStage 'Claude npm package' -Vendor 'Anthropic' -NoExit
 if ($script:commands.Count -ne 1 -or $script:commands[0] -ne 'npm uninstall -g @anthropic-ai/claude-code')
 {
     throw 'Removal affected another component'
@@ -710,12 +677,9 @@ function Invoke-LoggedCommand
     $script:commands.Add("$FilePath $( $Arguments -join ' ' )")
     $script:dshVersion = '0.2.1-rc.6'
 }
-$CheckOnly = $true
-$OnlyStage = $null
-$Vendor = 'DeepSeek'
 $script:messages.Clear()
 $script:commands.Clear()
-Invoke-Expression $dispatchText
+Invoke-UpdaterMain -CheckOnly -Action 'Update' -Vendor 'DeepSeek' -NoExit
 $dshResults = @($script:messages | Where-Object { $_ -like 'UI_RESULT *' } | ForEach-Object { $_.Substring(10) | ConvertFrom-Json })
 if ($dshResults.Count -ne 1 -or $dshResults[0].Stage -ne 'DSH' -or $dshResults[0].Result -ne 'AVAILABLE' -or ($script:commands -match 'npm install'))
 {
@@ -759,11 +723,7 @@ function Get-NpmLatestVersion
 {
     return '2.2.1'
 }
-$CheckOnly = $false
-$OnlyStage = 'Claude Code'
-$Vendor = 'Anthropic'
-$Action = 'Update'
-Invoke-Expression $dispatchText
+Invoke-UpdaterMain -Action 'Update' -OnlyStage 'Claude Code' -Vendor 'Anthropic' -NoExit
 $postAction = @($script:messages | Where-Object { $_ -like 'UI_RESULT *' } | ForEach-Object { $_.Substring(10) | ConvertFrom-Json })
 if ($postAction.Count -ne 1 -or $postAction[0].Stage -ne 'Claude Code' -or $postAction[0].Installed -ne '2.2.1')
 {
@@ -778,7 +738,7 @@ function Update-ClaudeCode
 $failedDispatch = $false
 try
 {
-    Invoke-Expression $dispatchText
+    Invoke-UpdaterMain -Action 'Update' -OnlyStage 'Claude Code' -Vendor 'Anthropic' -NoExit
 }
 catch
 {
@@ -794,11 +754,9 @@ if ($postFailedAction.Count -ne 1 -or $postFailedAction[0].Stage -ne 'Claude Cod
     throw 'Dispatcher skipped post-action version check after an update failure'
 }
 
-foreach ($fnName in @('Invoke-LoggedCommand', 'Invoke-CommandCaptureCore', 'Get-CodexPackagedStoreUpdateState', 'Start-CodexPackagedStoreInstall', 'Stop-CodexProcess'))
-{
-    $fnAst = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $fnName }, $false)[0]
-    Invoke-Expression $fnAst.Extent.Text
-}
+. (Join-Path $scriptsDirectory 'Update-Codex.ps1')
+Set-Item Function:\Invoke-LoggedCommand -Value $realInvokeLoggedCommand
+Set-Item Function:\Stop-CodexProcess -Value $realStopCodexProcess
 $logPath = Join-Path ([IO.Path]::GetTempPath()) "AIUpdater-stderr-test-$([guid]::NewGuid().ToString('N')).log"
 try
 {

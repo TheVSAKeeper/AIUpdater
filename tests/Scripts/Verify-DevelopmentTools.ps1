@@ -6,16 +6,6 @@ $ownerDefinition = (Get-Item Function:\Get-DevelopmentToolOwner).ScriptBlock
 function Get-DevelopmentToolOwner { param($Stage) return 'winget' }
 function Get-DevelopmentSdkVersions { return @('10.0.303') }
 function Get-ToolVersion { param($Tool) return '22.15.0' }
-$tokens = $null
-$parseErrors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile(
-    (Join-Path $scriptsDirectory 'Update-Codex.ps1'), [ref]$tokens, [ref]$parseErrors)
-if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
-foreach ($name in @('Compare-PackageVersions'))
-{
-    $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
-    if ($definition) { Invoke-Expression $definition.Extent.Text }
-}
 $script:messages = [System.Collections.Generic.List[string]]::new()
 $script:commands = [System.Collections.Generic.List[object]]::new()
 function Write-Log { param($Message) $script:messages.Add($Message) }
