@@ -1,4 +1,5 @@
 ﻿using AIUpdater.Models;
+using AIUpdater.Services;
 using AIUpdater.Views;
 using System.IO;
 using System.Reflection;
@@ -82,7 +83,7 @@ file static class Program
 
     private static void CheckStyles(string output)
     {
-        foreach (var type in new[] { typeof(Button), typeof(CheckBox), typeof(TextBox), typeof(ToolTip), typeof(ContextMenu), typeof(MenuItem), typeof(Separator), typeof(TabControl), typeof(TabItem), typeof(ListBox), typeof(ListBoxItem), typeof(ScrollViewer), typeof(ScrollBar), typeof(ProgressBar) })
+        foreach (var type in new[] { typeof(Button), typeof(CheckBox), typeof(TextBox), typeof(ToolTip), typeof(ContextMenu), typeof(MenuItem), typeof(Separator), typeof(GridSplitter), typeof(TabControl), typeof(TabItem), typeof(ListBox), typeof(ListBoxItem), typeof(ScrollViewer), typeof(ScrollBar), typeof(ProgressBar) })
         {
             var style = Application.Current.TryFindResource(type) as Style;
             Check(style is not null && style.Setters.OfType<Setter>().Any(setter => setter.Property == Control.TemplateProperty), $"Missing application template: {type.Name}");
@@ -181,6 +182,210 @@ file static class Program
         encoder.Save(stream);
     }
 
+    private static void CheckChangelog(string output, IReadOnlyCollection<UpdateStage> stages)
+    {
+        var previousCacheDir = ChangelogService.CacheDirectory;
+        var cacheDir = Path.Combine(output, "changelog-cache");
+        ChangelogService.CacheDirectory = cacheDir;
+        try
+        {
+            Check(ChangelogService.MaxResponseBufferBytes >= 32L * 1024 * 1024, "Changelog HTTP client buffer size is too small for multi-megabyte changelog feeds");
+            foreach (var item in stages)
+            {
+                var source = ChangelogService.ForStage(item.Id, item.InstalledVersion);
+                Check(source.DownloadUrl is not null && source.Format != "none" && !string.IsNullOrWhiteSpace(source.Note),
+                    $"Stage '{item.Id}' is missing a real changelog source");
+            }
+
+            var htmlSample = """
+                <main>
+                  <h1>ChatGPT &amp; Codex changelog</h1>
+                  <h2>November 2026</h2>
+                  <p>2026-11-06</p>
+                  <h2>1.21.6 <span>Latest</span></h2>
+                  <p>Google Antigravity IDE release notes and new capabilities for workspace agents.</p>
+                  <details><summary>Fixes (13)</summary><ul><li>Fixed crash when opening workspace</li></ul></details>
+                </main>
+                """;
+            var htmlParsed = ChangelogService.ParseReleases(htmlSample, "html");
+            Check(htmlParsed.Count == 1
+                  && htmlParsed[0].Version == "1.21.6"
+                  && !htmlParsed[0].Title.Contains("Latest", StringComparison.OrdinalIgnoreCase)
+                  && htmlParsed[0].Groups.Any(g => g.Category == ChangeCategory.Fixed && g.Items.Contains("Fixed crash when opening workspace"))
+                  && !htmlParsed[0].Groups.SelectMany(g => g.Items).Any(i => i.Contains("Es (13)", StringComparison.OrdinalIgnoreCase) || i.Contains("Fixes (13)", StringComparison.OrdinalIgnoreCase)),
+                "HTML changelog parser failed to skip page header, strip Latest badge, or classify <summary>Fixes (13)</summary>");
+
+            var codexAppHtml = """
+                <ul>
+                  <li data-codex-topics="codex-cli">
+                    <time>2026-10-08</time>
+                    <h3>Codex CLI 0.167.0</h3>
+                    <article>
+                      <h2>New Features</h2>
+                      <ul><li>Open the agent command center with <code>codex agents --no-daemon</code>.</li></ul>
+                      <h2>Bug Fixes</h2>
+                      <ul><li>Fixed CLI crash on startup.</li></ul>
+                    </article>
+                  </li>
+                  <li data-codex-topics="codex-app">
+                    <time>2026-10-08</time>
+                    <h3>Codex app 26.1007</h3>
+                    <article>
+                      <h2>New features</h2>
+                      <ul><li>Add, preview, and remove attachments without leaving the full-screen composer.</li></ul>
+                      <h2>Improvements and bug fixes</h2>
+                      <ul><li>Fixed window focus issue when switching threads in ChatGPT Desktop.</li></ul>
+                    </article>
+                  </li>
+                </ul>
+                """;
+            var codexAppParsed = ChangelogService.ParseReleases(codexAppHtml, "codex-app");
+            Check(codexAppParsed.Count == 1
+                  && codexAppParsed[0].Version == "26.1007"
+                  && codexAppParsed[0].Title.Contains("Codex app 26.1007", StringComparison.Ordinal)
+                  && codexAppParsed[0].Groups.Count == 2
+                  && codexAppParsed[0].Groups.Any(g => g.Category == ChangeCategory.Added)
+                  && codexAppParsed[0].Groups.Any(g => g.Category == ChangeCategory.Fixed)
+                  && codexAppParsed[0].Summary is null,
+                "codex-app parser failed to filter out codex-cli, split New features / Bug fixes, or injected mechanical summary before AI processing");
+
+            var nodeMd = """
+                ## 2026-10-28, Version 22.22.2 'Jod' (LTS)
+                ### Notable Changes
+                * \[[`fe2a6b2be8`](https://github.com/nodejs/node/commit/fe2a6b2be8)] - **crypto**: add support for [CVE-2026-99999](https://cve.org/CVE-2026-99999) mitigation
+                """;
+            var nodeParsed = ChangelogService.ParseReleases(nodeMd, "markdown");
+            Check(nodeParsed.Count == 1
+                  && nodeParsed[0].Groups[0].Items[0].Contains("`fe2a6b2be8` – crypto: add support for CVE-2026-99999 mitigation", StringComparison.Ordinal),
+                "Markdown changelog parser did not clean escaped commit brackets or inline URLs");
+
+            var agyParsed = ChangelogService.ParseReleases("1.5.2:\n  · Added: Headless execution mode\n  · Fixed: EBADENGINE crash on stderr\n1.5.1:\n  · Improved: Faster startup", "agy");
+            Check(agyParsed.Count == 2 && agyParsed[0].Version == "1.5.2" && agyParsed[0].Groups.Count == 2, "agy changelog parser failed to group releases");
+
+            var dshJson = """
+                {
+                  "dist-tags": { "latest": "0.2.2-rc.1" },
+                  "time": { "0.2.1-rc.5": "2026-10-01T10:00:00Z", "0.2.2-rc.1": "2026-11-05T12:00:00Z" },
+                  "versions": {
+                    "0.2.1-rc.5": { "engines": { "node": ">=22.0.0" }, "dependencies": { "@deepseek-ai/dsh-win32-x64": "0.2.1-rc.5" } },
+                    "0.2.2-rc.1": { "engines": { "node": ">=24.9.0" }, "dependencies": { "@deepseek-ai/dsh-win32-x64": "0.2.2-rc.1", "@deepseek-ai/dsh-mcp": "0.2.2-rc.1" } }
+                  }
+                }
+                """;
+            var dshParsed = ChangelogService.ParseReleases(dshJson, "npm-registry");
+            Check(dshParsed.Count == 2 && dshParsed[0].Version == "0.2.2-rc.1"
+                  && dshParsed[0].Groups.Any(g => g.Category == ChangeCategory.Added)
+                  && dshParsed[0].Groups.Any(g => g.Category == ChangeCategory.Changed && g.Items.Any(i => i.Contains(">=24.9.0", StringComparison.Ordinal))),
+                "DSH npm registry parser failed to extract version diff and Node engine requirement");
+
+            var dotnetJson = """
+                {
+                  "releases": [
+                    {
+                      "release-version": "10.0.5",
+                      "release-date": "2026-10-13",
+                      "security": true,
+                      "sdk": { "version": "10.0.303" },
+                      "sdks": [ { "version": "10.0.303" }, { "version": "10.0.114" } ],
+                      "runtime": { "version": "10.0.5" },
+                      "cve-list": [ { "cve-id": "CVE-2026-0001" } ]
+                    }
+                  ]
+                }
+                """;
+            var dotnetParsed = ChangelogService.ParseReleases(dotnetJson, "dotnet-releases");
+            Check(dotnetParsed.Count == 1 && dotnetParsed[0].Groups.Any(g => g.Category == ChangeCategory.Security), ".NET releases parser missed SDK or CVE details");
+
+            var cachedRelease = new ChangelogRelease
+            {
+                Version = agyParsed[1].Version,
+                Title = agyParsed[1].Title,
+                Groups = agyParsed[1].Groups,
+                TranslatedTitle = "Antigravity CLI v1.5.1",
+                TranslatedGroups = [new() { Category = ChangeCategory.Changed, Title = "Изменено и улучшено", Items = ["Ускорен запуск CLI"] }],
+            };
+            var merged = ChangelogService.MergeReleases(
+                ChangelogService.ParseReleases("1.5.2:\n  · Added: Headless execution mode\n  · Fixed: EBADENGINE crash on stderr\n1.5.1:\n  · Improved: Faster startup", "agy"),
+                [cachedRelease]);
+            Check(merged.Count == 2 && merged[1].HasTranslation && merged[1].TranslatedGroups![0].Items[0] == "Ускорен запуск CLI",
+                "Delta merge discarded cached translation of an existing version");
+
+            var doc = new ChangelogDocument
+            {
+                StageId = "Antigravity CLI",
+                UpdatedAt = DateTimeOffset.UtcNow,
+                Releases = agyParsed,
+            };
+            ChangelogService.SaveCachedDocument(doc);
+            var loadedDoc = ChangelogService.TryLoadCachedDocument("Antigravity CLI");
+            Check(loadedDoc is not null && loadedDoc.Releases.Count == 2 && !loadedDoc.Releases[0].HasTranslation && !loadedDoc.Releases[1].HasTranslation,
+                "Changelog disk cache round-trip failed");
+
+            ChangelogService.TranslatorOverride = (_, _) => Task.FromResult<string?>(
+                "[Summary]\nПоддержка фонового режима без окон и исправление обработки предупреждений npm в stderr.\n[Added]\nSummary: Фоновый режим выполнения CLI без всплывающих окон.\n- Режим выполнения без консольного окна\n[Fixed]\nSummary: Устранено ложное падение на предупреждениях EBADENGINE.\n- Исправлено падение на предупреждениях `EBADENGINE` в stderr");
+            var translated = AwaitResult(ChangelogService.TranslateReleaseAsync(loadedDoc!, loadedDoc!.Releases[0], CancellationToken.None));
+            Check(translated
+                  && loadedDoc!.Releases[0].HasTranslation
+                  && loadedDoc.Releases[0].TranslatedGroups!.Count == 2
+                  && !string.IsNullOrWhiteSpace(loadedDoc.Releases[0].TranslatedSummary)
+                  && loadedDoc.Releases[0].TranslatedGroups!.All(g => !string.IsNullOrWhiteSpace(g.Summary)),
+                "Flash translation did not populate translated groups or summaries on the target release");
+            var reloadedAfterTranslation = ChangelogService.TryLoadCachedDocument("Antigravity CLI");
+            Check(reloadedAfterTranslation is not null && reloadedAfterTranslation.Releases[0].HasTranslation && !reloadedAfterTranslation.Releases[1].HasTranslation,
+                "Translated release was not persisted to disk cache");
+
+            var agyStage = stages.First(s => s.Id == "Antigravity CLI");
+            var changelogWindow = new ChangelogWindow(stages, agyStage);
+            var componentList = (ListBox)changelogWindow.FindName("ComponentList");
+            Check(componentList.Items.Groups?.Count == 5, "ChangelogWindow did not group components by Vendor into 5 groups");
+            var searchBox = (TextBox)changelogWindow.FindName("ComponentSearchBox");
+            searchBox.Text = "DeepSeek";
+            Check(componentList.Items.Count == 1, "ComponentSearchBox filter did not narrow component list to DeepSeek");
+            searchBox.Text = "";
+            Check(componentList.Items.Count == stages.Count, "Clearing ComponentSearchBox did not restore full component list");
+            var installedOnlyCheckBox = (CheckBox)changelogWindow.FindName("InstalledOnlyCheckBox");
+            installedOnlyCheckBox.IsChecked = true;
+            Check(componentList.Items.Count > 0 && componentList.Items.Count < stages.Count,
+                "InstalledOnlyCheckBox did not filter out uninstalled components");
+            installedOnlyCheckBox.IsChecked = false;
+            Check(componentList.Items.Count == stages.Count,
+                "Unchecking InstalledOnlyCheckBox did not restore all components");
+
+            changelogWindow.RenderDocument(reloadedAfterTranslation!, agyStage);
+            var cardsPanel = (StackPanel)changelogWindow.FindName("ReleaseCardsPanel");
+            Check(cardsPanel.Children.Count == 2, "ChangelogWindow did not render structured release cards");
+            Render((FrameworkElement)changelogWindow.Content, Path.Combine(output, "changelog-cards.png"), 1120, 740);
+
+            var secondReleaseProcessed = AwaitResult(changelogWindow.TranslateReleaseOnDemandAsync(reloadedAfterTranslation!.Releases[1], true));
+            var reprocessedAgain = AwaitResult(changelogWindow.TranslateReleaseOnDemandAsync(reloadedAfterTranslation.Releases[0], true));
+            Check(secondReleaseProcessed && reprocessedAgain && reloadedAfterTranslation.Releases[1].HasTranslation,
+                "Repeated on-demand release processing failed or threw ObjectDisposedException");
+
+            var langBtn = (Button)changelogWindow.FindName("LanguageToggleButton");
+            Check(langBtn.Content.ToString()!.Contains("Русский", StringComparison.Ordinal), "Language button did not show Russian AI state");
+            Call(changelogWindow, "LanguageToggleButton_Click", langBtn, new RoutedEventArgs());
+            Check(langBtn.Content.ToString()!.Contains("Оригинал", StringComparison.Ordinal), "Language toggle did not switch to original");
+            var zoomInBtn = (Button)changelogWindow.FindName("ZoomInButton");
+            var zoomResetBtn = (Button)changelogWindow.FindName("ZoomResetButton");
+            Call(changelogWindow, "ZoomInButton_Click", zoomInBtn, new RoutedEventArgs());
+            Check(zoomResetBtn.Content.ToString() != "100%", "Changelog zoom in did not update zoom percentage");
+            Call(changelogWindow, "ZoomResetButton_Click", zoomResetBtn, new RoutedEventArgs());
+            Check(zoomResetBtn.Content.ToString() == "100%", "Changelog zoom reset did not restore 100%");
+            changelogWindow.Close();
+        }
+        finally
+        {
+            ChangelogService.TranslatorOverride = null;
+            ChangelogService.CacheDirectory = previousCacheDir;
+        }
+    }
+
+    private static T AwaitResult<T>(Task<T> task)
+    {
+        Await(task);
+        return task.GetAwaiter().GetResult();
+    }
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -250,6 +455,12 @@ file static class Program
         Check(errorSummary == "Ошибок проверки: 1 · Не установлено: 1", "Summary mixed absence and check failures");
         Set(window, "_runStages", new[] { stage });
         Check(!((TextBox)window.FindName("LogTextBox")).Text.Contains("UI_RESULT"), "Protocol leaked into the visible journal");
+        var warningRun = Activator.CreateInstance(runType, "Anthropic")!;
+        stage.SetRunning(OperationState.Updating);
+        runType.GetProperty("ActiveStage")!.SetValue(warningRun, stage);
+        Call(window, "HandleOutputLine", "npm warn EBADENGINE Unsupported engine", true, warningRun);
+        Check(!(bool)runType.GetProperty("SawError")!.GetValue(warningRun)! && stage.OperationState == OperationState.Updating, "Non-fatal stderr warning marked the stage as failed");
+        stage.SetCompleted();
         Call(window, "HandleOutputLine", "[12:34:56] UI_RESULT {\"Stage\":\"Codex desktop\",\"Result\":\"CURRENT\"}", false, run);
         Check((bool)runType.GetProperty("SawError")!.GetValue(run)!, "Cross-vendor result was accepted");
         Call(window, "HandleOutputLine", "[12:34:56] UI_RESULT {bad json}", false, run);
@@ -281,6 +492,18 @@ file static class Program
             Check(tabs.TranslatePoint(new(0, tabs.ActualHeight), root).Y <= root.ActualHeight,
                 $"Journal extends below the window: {width}x{height}, bottom={tabs.TranslatePoint(new(0, tabs.ActualHeight), root).Y}, available={root.ActualHeight}");
 
+            var splitter = (GridSplitter)window.FindName("LogSplitter");
+            Check(splitter.ActualHeight >= 8, "GridSplitter between cards and journal collapsed");
+            var mainLogBox = (TextBox)window.FindName("LogTextBox");
+            Check(mainLogBox.ActualHeight >= 60, $"Main log viewport is too small ({mainLogBox.ActualHeight}px) at {width}x{height}");
+            var tabControl = (TabControl)window.FindName("LogTabs");
+            tabControl.SelectedIndex = 1;
+            root.UpdateLayout();
+            var vendorLogBox = Descendants<TextBox>(tabControl).First(box => box != mainLogBox);
+            Check(vendorLogBox.ActualHeight >= 55, $"Vendor log viewport is too small ({vendorLogBox.ActualHeight}px) at {width}x{height}");
+            tabControl.SelectedIndex = 0;
+            root.UpdateLayout();
+
             Check(Descendants<Button>(root).Count(button => Equals(button.Content, "⋮")) == window.Stages.Count, "Missing visible card menus");
             Check(Descendants<Border>(root).Count(border => border.ContextMenu is not null) == window.Stages.Count, "Card context menus missing");
             var directChoices = Descendants<CheckBox>(root).Where(box => box.DataContext is UpdateStage { PackageStatus: PackageStatus.DirectUpdate }).ToArray();
@@ -309,6 +532,14 @@ file static class Program
         }
 
         Check(((Button)window.FindName("StopButton")).Visibility == Visibility.Collapsed, "Idle stop button is visible");
+        var logZoomIn = (Button)window.FindName("LogZoomInButton");
+        var logZoomOut = (Button)window.FindName("LogZoomOutButton");
+        var initialLogSize = ((TextBox)window.FindName("LogTextBox")).FontSize;
+        Call(window, "LogZoomInButton_Click", logZoomIn, new RoutedEventArgs());
+        Check(Math.Abs(((TextBox)window.FindName("LogTextBox")).FontSize - (initialLogSize + 1)) < 0.01, "Log zoom in did not increase font size");
+        Call(window, "LogZoomOutButton_Click", logZoomOut, new RoutedEventArgs());
+        Check(Math.Abs(((TextBox)window.FindName("LogTextBox")).FontSize - initialLogSize) < 0.01, "Log zoom out did not restore font size");
+        CheckChangelog(output, window.Stages);
         var fixture = Path.Combine(output, "fixture.ps1");
         var calls = Path.Combine(output, "calls.txt");
         File.WriteAllText(calls, "");
