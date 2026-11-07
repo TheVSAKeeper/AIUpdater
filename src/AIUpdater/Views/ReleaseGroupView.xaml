@@ -1,0 +1,88 @@
+﻿<UserControl x:Class="AIUpdater.Views.ReleaseGroupView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:infra="clr-namespace:AIUpdater.Infrastructure">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolVisibility" />
+    </UserControl.Resources>
+    <StackPanel Margin="0,6,0,4">
+        <Grid Cursor="Hand"
+              Background="Transparent"
+              Margin="0,2,0,3">
+            <Grid.InputBindings>
+                <MouseBinding MouseAction="LeftClick"
+                              Command="{Binding ToggleCollapseCommand}" />
+            </Grid.InputBindings>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding ChevronText}"
+                       FontSize="{Binding MetaFontSize}"
+                       Foreground="{StaticResource MutedBrush}"
+                       VerticalAlignment="Center"
+                       Margin="0,0,6,0" />
+            <TextBlock Grid.Column="1"
+                       Text="{Binding HeaderText}"
+                       FontSize="{Binding TitleFontSize}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"
+                       Margin="0,0,8,0">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground"
+                                Value="#BAD0C3" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Category}"
+                                         Value="Added">
+                                <Setter Property="Foreground"
+                                        Value="#7FE2AE" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Category}"
+                                         Value="Fixed">
+                                <Setter Property="Foreground"
+                                        Value="#93C5E2" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Category}"
+                                         Value="Security">
+                                <Setter Property="Foreground"
+                                        Value="#F8A5A5" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+            <TextBlock Grid.Column="2"
+                       Text="{Binding SummaryPreviewText}"
+                       ToolTip="{Binding SummaryPreviewTooltip}"
+                       FontSize="{Binding MetaFontSize}"
+                       Foreground="{StaticResource MutedBrush}"
+                       VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis"
+                       Visibility="{Binding IsSummaryPreviewVisible, Converter={StaticResource BoolVisibility}}" />
+        </Grid>
+        <ItemsControl ItemsSource="{Binding Items}"
+                      Margin="14,2,0,0"
+                      Visibility="{Binding IsExpanded, Converter={StaticResource BoolVisibility}}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Grid Margin="0,2,0,3">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="•"
+                                   FontSize="{Binding DataContext.BaseFontSize, RelativeSource={RelativeSource AncestorType=UserControl}, Mode=OneWay}"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   VerticalAlignment="Top" />
+                        <infra:FormattedTextBlock Grid.Column="1"
+                                                  FormattedText="{Binding Mode=OneWay}"
+                                                  FontSize="{Binding DataContext.BaseFontSize, RelativeSource={RelativeSource AncestorType=UserControl}, Mode=OneWay}"
+                                                  Foreground="#DAE8DF" />
+                    </Grid>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </StackPanel>
+</UserControl>

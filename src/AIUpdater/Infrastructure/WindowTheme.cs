@@ -6,12 +6,16 @@ namespace AIUpdater.Infrastructure;
 
 internal static class WindowTheme
 {
+    private const int DwmwaUseImmersiveDarkMode = 20;
+    private const int DwmwaCaptionColor = 35;
+    private const int DwmwaTextColor = 36;
+
     public static void Apply(Window window)
     {
         var handle = new WindowInteropHelper(window).Handle;
-        SetAttribute(handle, 20, 1); // DWMWA_USE_IMMERSIVE_DARK_MODE
-        SetAttribute(handle, 35, 0x0011140B); // DWMWA_CAPTION_COLOR, COLORREF
-        SetAttribute(handle, 36, 0x00F1F7ED); // DWMWA_TEXT_COLOR
+        SetAttribute(handle, DwmwaUseImmersiveDarkMode, 1);
+        SetAttribute(handle, DwmwaCaptionColor, 0x0011140B);
+        SetAttribute(handle, DwmwaTextColor, 0x00F1F7ED);
     }
 
     private static void SetAttribute(nint handle, int attribute, int value)

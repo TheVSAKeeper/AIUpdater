@@ -1,0 +1,120 @@
+﻿<UserControl x:Class="AIUpdater.Views.StageCardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolVisibility" />
+    </UserControl.Resources>
+    <Border x:Name="CardBorder"
+            Background="#182A21"
+            CornerRadius="9"
+            Margin="6,0,0,0"
+            BorderThickness="1"
+            Padding="6">
+        <Border.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="Проверить"
+                          Command="{Binding CheckCommand}" />
+                <MenuItem Header="Обновить"
+                          Command="{Binding UpdateCommand}"
+                          IsEnabled="{Binding Stage.CanUpdate}" />
+                <MenuItem Header="Установить"
+                          Command="{Binding InstallCommand}"
+                          IsEnabled="{Binding Stage.CanManageInstallation}" />
+                <MenuItem Header="Удалить"
+                          Command="{Binding UninstallCommand}"
+                          IsEnabled="{Binding Stage.CanManageInstallation}" />
+                <Separator />
+                <MenuItem Header="Что нового"
+                          Command="{Binding OpenChangelogCommand}" />
+            </ContextMenu>
+        </Border.ContextMenu>
+        <Border.Style>
+            <Style TargetType="Border">
+                <Setter Property="BorderBrush"
+                        Value="{StaticResource BorderBrush}" />
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver"
+                             Value="True">
+                        <Setter Property="BorderBrush"
+                                Value="{StaticResource AccentTextBrush}" />
+                    </Trigger>
+                    <DataTrigger Binding="{Binding Stage.PackageStatus}"
+                                 Value="NotInstalled">
+                        <Setter Property="Opacity"
+                                Value="0.7" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
+        <Grid DataContext="{Binding Stage}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <CheckBox VerticalAlignment="Center"
+                      Margin="0,0,3,0"
+                      MinWidth="28"
+                      MinHeight="36"
+                      Padding="6"
+                      IsChecked="{Binding IsSelectedForUpdate}"
+                      Visibility="{Binding CanSelectForUpdate, Converter={StaticResource BoolVisibility}}"
+                      ToolTip="Выбрать для обновления"
+                      AutomationProperties.Name="{Binding Name, StringFormat=Выбрать для обновления: {0}}" />
+            <Button Grid.Column="1"
+                    Tag="Stage"
+                    Command="{Binding DataContext.SelectOrCheckCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                    HorizontalContentAlignment="Stretch"
+                    Padding="2"
+                    MinHeight="52"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    ToolTip="{Binding ResultDescription}"
+                    VerticalContentAlignment="Top"
+                    AutomationProperties.Name="{Binding CardActionName}">
+                <StackPanel VerticalAlignment="Top">
+                    <TextBlock Text="{Binding Name}"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding Name}" />
+                    <Grid Margin="0,4,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="11" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Ellipse Width="6"
+                                 Height="6"
+                                 Fill="{Binding StatusBrush}"
+                                 Margin="0,0,5,0" />
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding Status}"
+                                   Foreground="{Binding StatusBrush}"
+                                   FontSize="11"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding Status}" />
+                    </Grid>
+                    <TextBlock FontSize="11"
+                               Margin="0,3,0,0"
+                               TextWrapping="Wrap">
+                        <Run Text="{Binding VersionPrefixText, Mode=OneWay}"
+                             Foreground="{Binding VersionBrush}" />
+                        <Run Text="{Binding VersionTargetText, Mode=OneWay}"
+                             Foreground="{Binding VersionTargetBrush}" />
+                    </TextBlock>
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="2"
+                    Content="⋮"
+                    MinHeight="26"
+                    Width="22"
+                    Padding="0"
+                    VerticalAlignment="Top"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Click="CardMenuButton_Click"
+                    ToolTip="Действия с инструментом"
+                    AutomationProperties.Name="{Binding Name, StringFormat=Действия: {0}}" />
+        </Grid>
+    </Border>
+</UserControl>

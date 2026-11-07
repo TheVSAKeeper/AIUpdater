@@ -2,6 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:models="clr-namespace:AIUpdater.Models"
+        xmlns:vm="clr-namespace:AIUpdater.ViewModels"
+        xmlns:views="clr-namespace:AIUpdater.Views"
         Title="Что нового – AI Updater"
         Icon="/AIUpdater;component/Assets/AIUpdater.ico"
         Width="1120"
@@ -14,6 +16,7 @@
         WindowStartupLocation="CenterOwner"
         PreviewMouseWheel="Window_PreviewMouseWheel">
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolVisibility" />
         <DataTemplate DataType="{x:Type models:UpdateStage}">
             <Grid Margin="2,1">
                 <Grid.ColumnDefinitions>
@@ -31,6 +34,9 @@
                            Margin="8,0,0,0"
                            VerticalAlignment="Center" />
             </Grid>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ReleaseCardViewModel}">
+            <views:ReleaseCardView />
         </DataTemplate>
     </Window.Resources>
     <Grid Margin="20"
@@ -57,36 +63,36 @@
                         Orientation="Horizontal"
                         VerticalAlignment="Center">
                 <Button x:Name="LanguageToggleButton"
-                        Content="Русский (ИИ)"
-                        Click="LanguageToggleButton_Click"
+                        Content="{Binding LanguageToggleText}"
+                        Command="{Binding ToggleLanguageCommand}"
                         MinHeight="30"
                         Padding="12,5"
                         Margin="0,0,8,0"
                         ToolTip="Переключить язык отображения для обработанных выпусков (Русский / Оригинал)" />
                 <Button x:Name="RefreshChangelogButton"
                         Content="Проверить новые"
-                        Click="RefreshChangelogButton_Click"
+                        Command="{Binding RefreshCommand}"
                         MinHeight="30"
                         Padding="12,5"
                         Margin="0,0,12,0"
                         ToolTip="Принудительно проверить наличие новых выпусков в источнике" />
                 <Button x:Name="ZoomOutButton"
                         Content="A-"
-                        Click="ZoomOutButton_Click"
+                        Command="{Binding ZoomOutCommand}"
                         MinHeight="30"
                         Padding="9,5"
                         Margin="0,0,4,0"
                         ToolTip="Уменьшить размер текста (Ctrl + Колесо мыши)" />
                 <Button x:Name="ZoomResetButton"
-                        Content="100%"
-                        Click="ZoomResetButton_Click"
+                        Content="{Binding ZoomLabel}"
+                        Command="{Binding ZoomResetCommand}"
                         MinHeight="30"
                         Padding="9,5"
                         Margin="0,0,4,0"
                         ToolTip="Сбросить масштаб текста" />
                 <Button x:Name="ZoomInButton"
                         Content="A+"
-                        Click="ZoomInButton_Click"
+                        Command="{Binding ZoomInCommand}"
                         MinHeight="30"
                         Padding="9,5"
                         ToolTip="Увеличить размер текста (Ctrl + Колесо мыши)" />
@@ -107,7 +113,7 @@
                     <TextBox x:Name="ComponentSearchBox"
                              Padding="9,6"
                              FontSize="12"
-                             TextChanged="ComponentSearchBox_TextChanged"
+                             Text="{Binding SearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                              ToolTip="Фильтр компонентов по названию или группе" />
                     <TextBlock x:Name="ComponentSearchPlaceholder"
                                Text="Поиск компонента…"
@@ -115,7 +121,8 @@
                                FontSize="12"
                                Margin="11,0,8,0"
                                VerticalAlignment="Center"
-                               IsHitTestVisible="False" />
+                               IsHitTestVisible="False"
+                               Visibility="{Binding IsSearchPlaceholderVisible, Converter={StaticResource BoolVisibility}}" />
                 </Grid>
                 <CheckBox x:Name="InstalledOnlyCheckBox"
                           Grid.Row="1"
@@ -123,8 +130,7 @@
                           FontSize="12"
                           Foreground="{StaticResource MutedBrush}"
                           Margin="2,0,0,8"
-                          Checked="InstalledOnlyCheckBox_Changed"
-                          Unchecked="InstalledOnlyCheckBox_Changed"
+                          IsChecked="{Binding InstalledOnly, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                           ToolTip="Показывать в списке только установленные компоненты" />
                 <ListBox x:Name="ComponentList"
                          Grid.Row="2"
@@ -132,7 +138,8 @@
                          BorderBrush="{StaticResource BorderBrush}"
                          Foreground="{StaticResource TextBrush}"
                          ScrollViewer.CanContentScroll="False"
-                         SelectionChanged="ComponentList_SelectionChanged">
+                         ItemsSource="{Binding StagesView}"
+                         SelectedItem="{Binding SelectedStage, Mode=TwoWay}">
                     <ListBox.GroupStyle>
                         <GroupStyle>
                             <GroupStyle.HeaderTemplate>
@@ -152,71 +159,21 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <TextBlock x:Name="SourceNoteText"
+                           Text="{Binding SourceNote}"
                            Foreground="{StaticResource MutedBrush}"
                            TextWrapping="Wrap"
                            Margin="0,0,0,4" />
                 <TextBlock x:Name="LoadStatusText"
                            Grid.Row="1"
+                           Text="{Binding LoadStatusText}"
                            Foreground="{StaticResource AccentTextBrush}"
                            Margin="0,0,0,8"
                            TextWrapping="Wrap" />
-                <Border x:Name="TranslationBannerBorder"
-                        Grid.Row="2"
-                        Background="{StaticResource SurfaceBrush}"
-                        BorderBrush="{StaticResource BorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="6"
-                        Padding="12,7"
-                        Margin="0,0,0,8"
-                        Visibility="Collapsed">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel>
-                            <TextBlock x:Name="TranslationBannerTitle"
-                                       Text="Обработка выпуска через Antigravity Flash…"
-                                       FontSize="12"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextBrush}"
-                                       TextWrapping="Wrap" />
-                            <TextBlock x:Name="TranslationBannerDetail"
-                                       Text="Составление краткого резюме выпуска, резюме блоков и перевод…"
-                                       FontSize="11"
-                                       Foreground="{StaticResource MutedBrush}"
-                                       Margin="0,2,0,0"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-                        <Button x:Name="CancelTranslationButton"
-                                Grid.Column="1"
-                                Content="Отменить"
-                                Click="CancelTranslationButton_Click"
-                                MinHeight="26"
-                                Padding="10,3"
-                                Margin="10,0,0,0"
-                                VerticalAlignment="Center" />
-                        <ProgressBar x:Name="TranslationProgressBar"
-                                     Grid.Row="1"
-                                     Grid.ColumnSpan="2"
-                                     Height="2"
-                                     Margin="0,6,0,0"
-                                     Background="#16261E"
-                                     Foreground="{StaticResource AccentBrush}"
-                                     BorderThickness="0"
-                                     IsIndeterminate="True" />
-                    </Grid>
-                </Border>
-                <Border Grid.Row="3"
+                <Border Grid.Row="2"
                         Background="#0A1410"
                         BorderBrush="{StaticResource BorderBrush}"
                         BorderThickness="1"
@@ -225,8 +182,10 @@
                         <ScrollViewer x:Name="ReleasesScrollViewer"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled"
-                                      Padding="14">
-                            <StackPanel x:Name="ReleaseCardsPanel" />
+                                      Padding="14"
+                                      Visibility="{Binding IsCardsVisible, Converter={StaticResource BoolVisibility}}">
+                            <ItemsControl x:Name="ReleaseCardsPanel"
+                                          ItemsSource="{Binding Releases}" />
                         </ScrollViewer>
                         <TextBox x:Name="ChangelogTextBox"
                                  Background="#0C1712"
@@ -236,20 +195,21 @@
                                  IsReadOnly="True"
                                  TextWrapping="Wrap"
                                  FontFamily="Segoe UI"
-                                 FontSize="14"
+                                 FontSize="{Binding BaseFontSize, Mode=OneWay}"
                                  VerticalScrollBarVisibility="Auto"
                                  AcceptsReturn="True"
-                                 Visibility="Collapsed"
-                                 TextChanged="ChangelogTextBox_TextChanged" />
+                                 Text="{Binding RawText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Visibility="{Binding IsRawTextVisible, Converter={StaticResource BoolVisibility}}" />
                     </Grid>
                 </Border>
-                <StackPanel Grid.Row="4"
+                <StackPanel Grid.Row="3"
                             Orientation="Horizontal"
                             HorizontalAlignment="Right"
                             Margin="0,12,0,0">
                     <Button x:Name="SourceButton"
                             Content="Открыть источник"
-                            Click="SourceButton_Click"
+                            Command="{Binding OpenSourceCommand}"
+                            ToolTip="{Binding SourcePageUrl}"
                             Margin="0,0,10,0" />
                     <Button Content="Закрыть"
                             Click="CloseButton_Click" />
