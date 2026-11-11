@@ -158,7 +158,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
             : checkOnly
                 ? requestedStage is null ? "Проверка версий без установки обновлений" : $"Только проверка: {requestedStage.Name}"
                 : requestedStage is null
-                    ? "Проверка и установка всех обновлений"
+                    ? $"Обновление выбранных компонентов ({runStages.Length})"
                     : $"Обновление: {requestedStage.Name}";
     }
 

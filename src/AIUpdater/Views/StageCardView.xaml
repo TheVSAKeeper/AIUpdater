@@ -1,121 +1,83 @@
 ﻿<UserControl x:Class="AIUpdater.Views.StageCardView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <UserControl.Resources>
-        <BooleanToVisibilityConverter x:Key="BoolVisibility" />
-    </UserControl.Resources>
-    <Border x:Name="CardBorder"
-            Background="{DynamicResource Bg.SurfaceAlt}"
-            CornerRadius="9"
-            Margin="6,0,0,0"
-            BorderThickness="1"
-            Padding="6">
-        <Border.ContextMenu>
-            <ContextMenu>
-                <MenuItem Header="Проверить"
-                          Command="{Binding CheckCommand}" />
-                <MenuItem Header="Обновить"
-                          Command="{Binding UpdateCommand}"
-                          IsEnabled="{Binding Stage.CanUpdate}" />
-                <MenuItem Header="Установить"
-                          Command="{Binding InstallCommand}"
-                          IsEnabled="{Binding Stage.CanManageInstallation}" />
-                <MenuItem Header="Удалить"
-                          Command="{Binding UninstallCommand}"
-                          IsEnabled="{Binding Stage.CanManageInstallation}" />
-                <Separator />
-                <MenuItem Header="Что нового"
-                          Command="{Binding OpenChangelogCommand}" />
-            </ContextMenu>
-        </Border.ContextMenu>
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:models="clr-namespace:AIUpdater.Models"
+             xmlns:views="clr-namespace:AIUpdater.Views"
+             xmlns:icons="http://metro.mahapps.com/winfx/xaml/iconpacks">
+    <UserControl.Resources><BooleanToVisibilityConverter x:Key="BoolVisibility" /></UserControl.Resources>
+    <Border x:Name="CardBorder" BorderThickness="3,0,0,0" Padding="10,7" MinHeight="40" ToolTip="{Binding Stage.ResultDescription}">
         <Border.Style>
             <Style TargetType="Border">
-                <Setter Property="BorderBrush"
-                        Value="{DynamicResource Border.Default}" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
                 <Style.Triggers>
-                    <Trigger Property="IsMouseOver"
-                             Value="True">
-                        <Setter Property="BorderBrush"
-                                Value="{DynamicResource Accent.Text}" />
-                    </Trigger>
-                    <DataTrigger Binding="{Binding Stage.PackageStatus}"
-                                 Value="NotInstalled">
-                        <Setter Property="Opacity"
-                                Value="0.7" />
-                    </DataTrigger>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /></Trigger>
+                    <DataTrigger Binding="{Binding Stage.OperationState}" Value="{x:Static models:OperationState.Checking}"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /><Setter Property="BorderBrush" Value="{DynamicResource Accent.Primary}" /></DataTrigger>
+                    <DataTrigger Binding="{Binding Stage.OperationState}" Value="{x:Static models:OperationState.Updating}"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /><Setter Property="BorderBrush" Value="{DynamicResource Accent.Primary}" /></DataTrigger>
+                    <DataTrigger Binding="{Binding Stage.OperationState}" Value="{x:Static models:OperationState.Installing}"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /><Setter Property="BorderBrush" Value="{DynamicResource Accent.Primary}" /></DataTrigger>
+                    <DataTrigger Binding="{Binding Stage.OperationState}" Value="{x:Static models:OperationState.Uninstalling}"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /><Setter Property="BorderBrush" Value="{DynamicResource Accent.Primary}" /></DataTrigger>
                 </Style.Triggers>
             </Style>
         </Border.Style>
+        <Border.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="Проверить" Command="{Binding CheckCommand}" />
+                <MenuItem Header="Обновить" Command="{Binding UpdateCommand}" IsEnabled="{Binding Stage.CanUpdate}" />
+                <MenuItem Header="Установить" Command="{Binding InstallCommand}" IsEnabled="{Binding Stage.CanManageInstallation}" />
+                <MenuItem Header="Удалить" Command="{Binding UninstallCommand}" IsEnabled="{Binding Stage.CanManageInstallation}" />
+                <Separator />
+                <MenuItem Header="Что нового" Command="{Binding OpenChangelogCommand}" />
+            </ContextMenu>
+        </Border.ContextMenu>
         <Grid DataContext="{Binding Stage}">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="32" /><ColumnDefinition Width="2.2*" /><ColumnDefinition Width="1.1*" />
+                <ColumnDefinition Width="1.1*" /><ColumnDefinition Width="1.7*" /><ColumnDefinition Width="32" />
             </Grid.ColumnDefinitions>
-            <CheckBox VerticalAlignment="Center"
-                      Margin="0,0,3,0"
-                      MinWidth="28"
-                      MinHeight="36"
-                      Padding="6"
-                      IsChecked="{Binding IsSelectedForUpdate}"
-                      Visibility="{Binding CanSelectForUpdate, Converter={StaticResource BoolVisibility}}"
-                      ToolTip="Выбрать для обновления"
-                      AutomationProperties.Name="{Binding Name, StringFormat=Выбрать для обновления: {0}}" />
-            <Grid Grid.Column="1">
-                <Button Tag="Stage"
-                    Command="{Binding DataContext.SelectOrCheckCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                    HorizontalContentAlignment="Stretch"
-                    Padding="2"
-                    MinHeight="52"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    ToolTip="{Binding ResultDescription}"
-                    VerticalContentAlignment="Top"
-                    AutomationProperties.Name="{Binding CardActionName}" />
-                <StackPanel VerticalAlignment="Top" IsHitTestVisible="False" Margin="2">
+            <Grid Visibility="{Binding DataContext.CanStartRun, RelativeSource={RelativeSource AncestorType=views:UpdatesView}, Converter={StaticResource BoolVisibility}}">
+                <CheckBox IsChecked="{Binding IsSelectedForUpdate}" Visibility="{Binding CanSelectForUpdate, Converter={StaticResource BoolVisibility}}"
+                          IsEnabled="{Binding DataContext.CanStartRun, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}"
+                          VerticalAlignment="Center" ToolTip="Выбрать для обновления" AutomationProperties.Name="{Binding Name, StringFormat=Выбрать для обновления: {0}}" />
+            </Grid>
+            <Grid Grid.Column="1" Margin="0,0,10,0">
+                <Button Command="{Binding DataContext.SelectOrCheckCommand, RelativeSource={RelativeSource AncestorType=views:StageCardView}}"
+                        IsEnabled="{Binding DataContext.CanStartRun, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}"
+                        Background="Transparent" BorderThickness="0" HorizontalAlignment="Stretch" Padding="0" MinHeight="20"
+                        ToolTip="{Binding ResultDescription}" AutomationProperties.Name="{Binding CardActionName}" />
+                <StackPanel VerticalAlignment="Center" IsHitTestVisible="False">
                     <TextBlock x:Name="StageTitle" Text="{Binding Name}"
-                               FontSize="{DynamicResource Font.Size.S}"
-                               FontWeight="SemiBold"
-                               TextWrapping="NoWrap"
-                               TextTrimming="CharacterEllipsis"
-                               ToolTip="{Binding Name}" />
-                    <Grid Margin="0,4,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="11" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Ellipse Width="6"
-                                 Height="6"
-                                 Fill="{Binding StatusBrush}"
-                                 Margin="0,0,5,0" />
-                        <TextBlock Grid.Column="1"
-                                   Text="{Binding Status}"
-                                   Foreground="{Binding StatusBrush}"
-                                   FontSize="{DynamicResource Font.Size.XS}"
-                                   TextTrimming="CharacterEllipsis"
-                                   ToolTip="{Binding Status}" />
-                    </Grid>
-                    <TextBlock FontSize="{DynamicResource Font.Size.XS}"
-                               Margin="0,3,0,0"
-                               TextWrapping="Wrap">
-                        <Run Text="{Binding VersionPrefixText, Mode=OneWay}"
-                             Foreground="{Binding VersionBrush}" />
-                        <Run Text="{Binding VersionTargetText, Mode=OneWay}"
-                             Foreground="{Binding VersionTargetBrush}" />
-                    </TextBlock>
+                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+                    <TextBlock Text="{Binding Vendor}" FontSize="{DynamicResource Font.Size.XS}" Foreground="{DynamicResource Fg.Muted}" Margin="0,2,0,0"
+                               Visibility="{Binding DataContext.ShowActiveOnly, RelativeSource={RelativeSource AncestorType=views:UpdatesView}, Converter={StaticResource BoolVisibility}}" />
                 </StackPanel>
             </Grid>
-            <Button Grid.Column="2"
-                    Content="⋮"
-                    MinHeight="26"
-                    Width="22"
-                    Padding="0"
-                    VerticalAlignment="Top"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    Click="CardMenuButton_Click"
-                    ToolTip="Действия с инструментом"
-                    AutomationProperties.Name="{Binding Name, StringFormat=Действия: {0}}" />
+            <TextBlock Grid.Column="2" Text="{Binding InstalledVersion, TargetNullValue=–}" Foreground="{DynamicResource Fg.Secondary}"
+                       VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding InstalledVersion}" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="3" Text="{Binding AvailableVersion, TargetNullValue=–}" Foreground="{Binding VersionTargetBrush}"
+                       VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding AvailableVersion}" Margin="0,0,10,0" />
+            <StackPanel Grid.Column="4" VerticalAlignment="Center" Margin="0,0,8,0" ToolTip="{Binding ResultDescription}">
+                <DockPanel>
+                    <Ellipse DockPanel.Dock="Left" Fill="{Binding StatusBrush}" Width="5" Height="5" Margin="0,0,7,0" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+                <TextBlock x:Name="OperationDetailText" Text="{Binding DataContext.OperationDetail, RelativeSource={RelativeSource AncestorType=views:StageCardView}}"
+                           Foreground="{DynamicResource Accent.Text}" FontSize="{DynamicResource Font.Size.XS}" Margin="12,2,0,0"
+                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Text, RelativeSource={RelativeSource Self}}" Value=""><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+            <Button x:Name="CardMenuButton" Grid.Column="5" MinWidth="28" MinHeight="20" Padding="4" Click="CardMenuButton_Click"
+                    Style="{DynamicResource Button.Ghost}" IsEnabled="{Binding DataContext.CanStartRun, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}"
+                    Visibility="{Binding DataContext.CanStartRun, RelativeSource={RelativeSource AncestorType=views:UpdatesView}, Converter={StaticResource BoolVisibility}}"
+                    ToolTip="Действия с инструментом" AutomationProperties.Name="{Binding Name, StringFormat=Действия: {0}}">
+                <icons:PackIconLucide Kind="{x:Static icons:PackIconLucideKind.EllipsisVertical}" Width="14" Height="14" />
+            </Button>
         </Grid>
     </Border>
 </UserControl>

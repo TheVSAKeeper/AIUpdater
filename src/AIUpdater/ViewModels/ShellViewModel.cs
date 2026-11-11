@@ -42,7 +42,7 @@ public sealed class ShellViewModel : ShellViewModelBase, IAppNavigator, IDisposa
     public ToastHostViewModel Toasts { get; }
     public ShellPreferences Preferences { get; }
     public bool IsBusy => Updates.IsRunning;
-    public string OperationCaption => Updates.OverallStatusText;
+    public string OperationCaption => Updates.StatusCaption;
     public override IPageHeader? EffectivePageHeader => Preferences.ShowPageHeader ? CurrentPageHeader : null;
 
     public bool Navigate(string key)
@@ -82,7 +82,7 @@ public sealed class ShellViewModel : ShellViewModelBase, IAppNavigator, IDisposa
     private void OnUpdatesChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainViewModel.IsRunning)) OnPropertyChanged(nameof(IsBusy));
-        if (e.PropertyName == nameof(MainViewModel.OverallStatusText)) OnPropertyChanged(nameof(OperationCaption));
+        if (e.PropertyName == nameof(MainViewModel.StatusCaption)) OnPropertyChanged(nameof(OperationCaption));
     }
 
     public override async Task<bool> RequestCloseAsync()

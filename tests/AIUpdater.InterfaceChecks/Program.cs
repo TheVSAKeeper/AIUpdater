@@ -742,6 +742,14 @@ internal static partial class Program
         var viewModel = shell.Updates;
         using var visualHost = KeepShell.Testing.VisualTestHost.Show(window, 1200, 800);
         visualHost.Settle();
+        if (args.Skip(1).Contains("--cached-ui"))
+        {
+            CaptureCachedViews(visualHost, window, shell, provider, output);
+            visualHost.Settle();
+            Check(bindingErrors.Count == 0, bindingErrors.Report);
+            Console.WriteLine("PASS: cached user data at two widths and font scales, zero binding errors, no source data writes");
+            return;
+        }
         var updatesView = Descendants<UpdatesView>(window).Single();
         Check(ReferenceEquals(window.DataContext, shell), "MainWindow DataContext is not ShellViewModel");
         viewModel.ConfigurePaths(resultsPath: Path.Combine(output, "results.json"));
@@ -844,7 +852,7 @@ internal static partial class Program
                                    Write-Output "[12:34:56] === $OnlyStage ==="
                                    if (Test-Path (Join-Path $PSScriptRoot 'fail')) { exit 5 }
                                    if (Test-Path (Join-Path $PSScriptRoot 'missing')) { exit 0 }
-                                   if (Test-Path (Join-Path $PSScriptRoot 'wait')) { Start-Sleep -Seconds 30 }
+                                   if ((Test-Path (Join-Path $PSScriptRoot 'wait')) -and $OnlyStage -ne 'DSH') { Write-Output ("{0} 37%" -f [char]0x2588); Start-Sleep -Seconds 30 }
                                    $result = if (Test-Path (Join-Path $PSScriptRoot 'error-result')) { 'ERROR' } else { 'CURRENT' }
                                    $json = @{ Stage = $OnlyStage; Result = $result; Installed = '2.2.1'; Available = '2.2.1' } | ConvertTo-Json -Compress
                                    Write-Output "[12:34:56] UI_RESULT $json"
@@ -890,9 +898,15 @@ internal static partial class Program
         File.Delete(Path.Combine(output, "missing"));
         File.WriteAllText(Path.Combine(output, "wait"), "");
         var stopped = viewModel.RunUpdaterAsync(null, "Update", false, [stage, other]);
-        CheckOperationNavigation(visualHost, window, shell);
+        CheckOperationNavigation(visualHost, window, shell, output);
         Await(stopped);
         Check(stage.OperationState == OperationState.Stopped && other.OperationState == OperationState.Stopped, "Stop did not finish running/queued cards");
+        Check(viewModel.CompletedCount == 2 && viewModel.ActiveCount == 0 && viewModel.QueuedCount == 0, "Stopped work remained active in the progress counters");
+        var parallel = viewModel.RunUpdaterAsync(null, "Update", true, viewModel.Stages.ToArray());
+        CheckParallelOperationLayout(visualHost, window, shell, output);
+        Await(viewModel.StopAsync());
+        Await(parallel);
+        Check(!viewModel.ShowActiveOnly, "The active filter hid results after the operation finished");
         File.Delete(Path.Combine(output, "wait"));
         File.WriteAllText(Path.Combine(output, "error-result"), "");
         Await(viewModel.RunUpdaterAsync(stage, "Update", true));

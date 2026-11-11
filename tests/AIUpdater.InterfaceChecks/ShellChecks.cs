@@ -16,6 +16,35 @@ namespace AIUpdater.InterfaceChecks;
 
 internal static partial class Program
 {
+    private static void CaptureCachedViews(VisualTestHost host, MainWindow window, ShellViewModel shell, IServiceProvider provider, string output)
+    {
+        var source = AppPaths.Default;
+        new FileStageResultStore(source.ResultsFile).Load(shell.Updates.Stages, message => throw new InvalidOperationException(message));
+        foreach (var vendor in shell.Updates.Vendors) shell.Updates.RefreshVendorSummary(vendor);
+        var stage = shell.Updates.Stages[0];
+        var cached = new FileChangelogRepository(source.ChangelogDirectory).TryLoad(stage.Id) ?? throw new InvalidOperationException("Нет сохранённой истории первого компонента");
+        cached.UpdatedAt = DateTimeOffset.UtcNow;
+        provider.GetRequiredService<IChangelogService>().SaveCachedDocument(cached);
+        shell.Changelog.SelectStage(shell.Updates.Stages[1]);
+        shell.ShowChangelog(stage);
+        foreach (var width in new[] { 1200, 1000 })
+        foreach (var scale in new[] { 1.0, 1.6 })
+        {
+            window.SetCurrentValue(FrameworkElement.WidthProperty, (double)width);
+            window.SetCurrentValue(FrameworkElement.HeightProperty, width == 1200 ? 800d : 700d);
+            shell.Preferences.FontScale = scale;
+            foreach (var key in new[] { SectionKey.Updates, SectionKey.Changelog })
+            {
+                shell.Navigate(key);
+                host.Settle();
+                var view = key == SectionKey.Updates ? (FrameworkElement)Descendants<UpdatesView>(window).Single() : Descendants<ChangelogView>(window).Single();
+                var scrolls = key == SectionKey.Updates ? Descendants<ScrollViewer>(view) : Descendants<ScrollViewer>((ListBox)view.FindName("ComponentList"));
+                Check(scrolls.All(scroll => scroll.ScrollableWidth <= 1), "Cached user data caused horizontal overflow");
+                Render((FrameworkElement)window.Content, Path.Combine(output, $"cached-{key}-{width}-{(int)(scale * 100)}.png"), width, width == 1200 ? 800 : 700);
+            }
+        }
+    }
+
     private static void CheckBindingSensor()
     {
         using var sensor = BindingErrorSink.Attach();
@@ -32,9 +61,16 @@ internal static partial class Program
         Check(violations.Count == 0, $"Direct platform calls in ViewModels: {string.Join(Environment.NewLine, violations)}");
     }
 
-    private static void CheckOperationNavigation(VisualTestHost host, MainWindow window, ShellViewModel shell)
+    private static void CheckOperationNavigation(VisualTestHost host, MainWindow window, ShellViewModel shell, string output)
     {
         Check(shell.IsBusy, "The operation fixture did not start");
+        Await(WaitForActiveStage(shell.Updates));
+        host.Settle();
+        Check(shell.Updates.RunTotal == 2 && shell.Updates.CompletedCount == 0 && shell.Updates.ActiveCount == 1 && shell.Updates.QueuedCount == 1, "Operation progress did not distinguish the active component and queued work");
+        Check(shell.Updates.ProgressMax == 2 && shell.Updates.ActiveOperationText.Contains("Claude"), "The operation panel has no total or current component");
+        var updates = Descendants<UpdatesView>(window).Single();
+        Check(((ItemsControl)updates.FindName("StageItemsControl")).IsEnabled && Descendants<StageCardView>(updates).All(view => ((TextBlock)view.FindName("StageTitle")).IsEnabled), "Running operations dimmed the component list");
+        Render((FrameworkElement)window.Content, Path.Combine(output, "shell-updates-running.png"), 1000, 700);
         var selected = shell.Changelog.SelectedStage;
         shell.ShowSettings();
         host.Settle();
@@ -58,6 +94,62 @@ internal static partial class Program
         Console.WriteLine("PASS: navigation during an operation, shared status stop, safe close cancellation and retained drafts");
     }
 
+    private static async Task WaitForActiveStage(MainViewModel updates)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (updates.IsRunning && (updates.ActiveCount == 0 || !updates.ActiveOperationText.Contains("37%"))) await Task.Delay(20, timeout.Token);
+    }
+
+    private static void CheckParallelOperationLayout(VisualTestHost host, MainWindow window, ShellViewModel shell, string output)
+    {
+        Await(WaitForParallelStages(shell.Updates));
+        shell.Navigate(SectionKey.Updates);
+        host.Settle();
+        var updates = Descendants<UpdatesView>(window).Single();
+        var status = Descendants<StatusBarView>(window).Single();
+        var cards = Descendants<StageCardView>(updates).Where(card => card.IsVisible).ToArray();
+        Check(shell.Updates.RunTotal == 17 && shell.Updates.CompletedCount == 1 && shell.Updates.QueuedCount == 12, "Parallel fixture did not reproduce the owner's running queue");
+        Check(cards.Count(card => ((TextBlock)card.FindName("OperationDetailText")).Text.Contains("37%")) == 4, "Per-component download details were lost or assigned to queued work");
+        foreach (var width in new[] { 1200, 1000 })
+        foreach (var scale in new[] { 1.0, 1.6 })
+        {
+            window.SetCurrentValue(FrameworkElement.WidthProperty, (double)width);
+            window.SetCurrentValue(FrameworkElement.HeightProperty, width == 1200 ? 800d : 700d);
+            shell.Preferences.FontScale = scale;
+            host.Settle();
+            Check(status.ActualHeight <= 48 * scale, "Parallel stage names expanded the shared status bar");
+            Check(((Border)updates.FindName("OperationPanel")).ActualHeight <= 4, "Progress displaced the component list");
+            Check(((ScrollViewer)updates.FindName("ComponentsScroll")).ActualHeight >= 250, "The component viewport collapsed during parallel work");
+            Check(!((TextBlock)status.FindName("OperationStatusText")).Text.Contains('\n'), "The common status contains explicit line breaks");
+            Check(Descendants<ScrollViewer>(updates).All(scroll => scroll.ScrollableWidth <= 1), "Parallel work caused horizontal overflow");
+            Render((FrameworkElement)window.Content, Path.Combine(output, $"parallel-updates-{width}-{(int)(scale * 100)}.png"), width, width == 1200 ? 800 : 700);
+            ((CheckBox)updates.FindName("ActiveOnlyToggle")).SetCurrentValue(ToggleButton.IsCheckedProperty, true);
+            host.Settle();
+            var activeCards = Descendants<StageCardView>(updates).Where(card => card.IsVisible).ToArray();
+            Render((FrameworkElement)window.Content, Path.Combine(output, $"parallel-active-{width}-{(int)(scale * 100)}.png"), width, width == 1200 ? 800 : 700);
+            Check(activeCards.Length == 4 && activeCards.Select(card => ((StageCardViewModel)card.DataContext).Stage.Vendor).Distinct().Count() == 4,
+                $"The active filter did not bring all four vendors into one list: visible={activeCards.Length}, model={shell.Updates.ShowActiveOnly}, all={((ItemsControl)updates.FindName("StageItemsControl")).IsVisible}, running={((ItemsControl)updates.FindName("RunningItemsControl")).Items.Count}");
+            ((CheckBox)updates.FindName("ActiveOnlyToggle")).SetCurrentValue(ToggleButton.IsCheckedProperty, false);
+            host.Settle();
+        }
+        shell.Preferences.FontScale = 1;
+        shell.Navigate(SectionKey.Logs);
+        host.Settle();
+        Check(status.IsVisible && shell.OperationCaption.Contains("В работе: 4"), "Progress disappeared when navigating away from updates");
+        Render((FrameworkElement)window.Content, Path.Combine(output, "parallel-logs-1000.png"), 1000, 700);
+        shell.Navigate(SectionKey.Updates);
+        shell.Updates.ShowActiveOnly = true;
+        Console.WriteLine("PASS: 17 components, four simultaneous processes, current row details, compact global progress and navigation at two widths and scales");
+    }
+
+    private static async Task WaitForParallelStages(MainViewModel updates)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        while (updates.IsRunning && (updates.ActiveCount != 4 || updates.CompletedCount != 1
+               || updates.Vendors.SelectMany(vendor => vendor.Cards).Cast<StageCardViewModel>().Count(card => card.OperationDetail.Contains("37%")) != 4))
+            await Task.Delay(20, timeout.Token);
+    }
+
     private static void CheckShellWindow(VisualTestHost host, MainWindow window, ShellViewModel shell, string output)
     {
         Check(window.Content is KeepShell.Views.ShellLayout { ModalCoversShell: true }, "The application must use the real ShellLayout, including its modal surface");
@@ -76,15 +168,12 @@ internal static partial class Program
             host.Settle();
             var cards = Descendants<StageCardView>(updates).ToArray();
             Check(cards.Length == 17, "The update page did not materialize every tool card");
-            Check(Descendants<UniformGrid>(updates).All(panel => panel.Columns == (width == 1200 ? 4 : 3)), "Card columns did not adapt to the shell content width");
             var widths = cards.Select(card => card.ActualWidth).ToArray();
             Check(widths.Max() - widths.Min() < 1, "Vendor card widths differ");
-            foreach (var row in cards.GroupBy(card => Math.Round(card.TranslatePoint(new(), updates).Y)))
-            {
-                var positions = row.Select(card => ((TextBlock)card.FindName("StageTitle")).TranslatePoint(new(), updates).Y).ToArray();
-                Check(positions.Max() - positions.Min() < 1, "Card titles are not aligned");
-            }
-            var menuButton = Descendants<Button>(cards[0]).First(button => Equals(button.Content, "⋮"));
+            var positions = cards.Select(card => ((TextBlock)card.FindName("StageTitle")).TranslatePoint(new(), updates).X).ToArray();
+            Check(positions.Max() - positions.Min() < 1, "Component name columns are not aligned");
+            Check(Descendants<ScrollViewer>(updates).All(viewer => viewer.ExtentWidth <= viewer.ViewportWidth + 1), "The component list overflows horizontally");
+            var menuButton = (Button)cards[0].FindName("CardMenuButton");
             menuButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
             var cardMenu = ((Border)cards[0].FindName("CardBorder")).ContextMenu;
             Check(cardMenu.DataContext is StageCardViewModel && cardMenu.Items.OfType<MenuItem>().Count() == 5, "Card actions lost their shared context");
@@ -141,7 +230,7 @@ internal static partial class Program
         shell.Preferences.ShowPageHeader = true;
         shell.Preferences.FontScale = 1.6;
         host.Settle();
-        Check(FontScaleManager.Current == 1.6 && Descendants<UniformGrid>(updates).All(panel => panel.Columns == 1), "Font scaling did not adjust the card layout");
+        Check(FontScaleManager.Current == 1.6 && Descendants<ScrollViewer>(updates).All(viewer => viewer.ExtentWidth <= viewer.ViewportWidth + 1), "Font scaling caused horizontal overflow in the component list");
         shell.Preferences.FontScale = 1;
         host.Settle();
 

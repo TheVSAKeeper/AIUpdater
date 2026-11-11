@@ -34,7 +34,13 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
 
         foreach (var stage in Stages)
         {
-            stage.PropertyChanged += (_, _) => RefreshUpdateButtonState();
+            stage.PropertyChanged += (_, e) =>
+            {
+                RefreshUpdateButtonState();
+                RefreshOperationProgress();
+                OnPropertyChanged(nameof(SummaryText));
+                if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == nameof(UpdateStage.OperationState)) OnPropertyChanged(nameof(RunningCards));
+            };
         }
 
         foreach (var vendor in Stages.Select(stage => stage.Vendor).Distinct())
@@ -48,10 +54,17 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
                     s => RunUpdaterAsync(s, checkOnly: false),
                     s => ExecuteComponentActionAsync(s, "Install"),
                     s => ExecuteComponentActionAsync(s, "Uninstall"),
-                    s => _dialogService.OpenChangelog(s)))
+                    s => _dialogService.OpenChangelog(s),
+                    () => Vendors.FirstOrDefault(vendorStatus => vendorStatus.Name == vendor)?.Detail))
                 .ToArray();
 
             var status = new VendorStatus(vendor, _executionService.GetVendorLogPath(vendor)) { Stages = vendorStages, Cards = cards };
+            status.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName != nameof(VendorStatus.Detail)) return;
+                OnPropertyChanged(nameof(ActiveOperationText));
+                foreach (var card in cards) card.RefreshOperationDetail();
+            };
             Vendors.Add(status);
             if (_executionService.ReadPreviousLog(status.LogPath, "История прошлого запуска\n") is { } previousVendorLog)
             {
@@ -66,6 +79,9 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
 
     public ObservableCollection<VendorStatus> Vendors { get; } = [];
     public ObservableCollection<UpdateStage> Stages { get; } = new(UpdateStage.CreateCatalog());
+    public IEnumerable<StageCardViewModel> RunningCards => Vendors.SelectMany(vendor => vendor.Cards).Cast<StageCardViewModel>()
+        .Where(card => card.Stage.IsActiveOperation && card.Stage.OperationState != OperationState.Queued);
+    public bool ShowActiveOnly { get; set => SetProperty(ref field, value); }
     public LogPanelViewModel LogPanel { get; }
     public string ScriptPath => _executionService.ScriptPath;
     public string LogPath => _executionService.LogPath;
@@ -82,11 +98,24 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
     } = "Готов к работе";
     public string PageTitle => "Обновления";
     public string PageDescription => "Проверка и обновление инструментов";
-    public string StatusCaption => OverallStatusText;
+    public string StatusCaption => IsRunning ? ProgressCaption : OverallStatusText;
     public bool IsBusy => IsRunning;
-    public bool IsIndeterminate => IsRunning;
-    public double ProgressValue => 0;
-    public double ProgressMax => 1;
+    public bool IsIndeterminate => false;
+    public int RunTotal => _runStages.Length;
+    public int QueuedCount => _runStages.Count(stage => stage.OperationState == OperationState.Queued);
+    public int ActiveCount => _runStages.Count(stage => stage.IsActiveOperation && stage.OperationState != OperationState.Queued);
+    public int CompletedCount => RunTotal - QueuedCount - ActiveCount;
+    public double ProgressValue => CompletedCount;
+    public double ProgressMax => Math.Max(1, RunTotal);
+    public string ProgressCaption => $"Выполнено {CompletedCount} из {RunTotal} · В работе: {ActiveCount} · В очереди: {QueuedCount}";
+    public string OperationTitle => _checkOnly ? "Проверка версий" : UpdaterExecutionService.GetOperationName(CurrentOperationState);
+    public string ActiveOperationText => string.Join(Environment.NewLine,
+        _runStages.Where(stage => stage.IsActiveOperation && stage.OperationState != OperationState.Queued).Select(stage =>
+        {
+            var detail = Vendors.FirstOrDefault(vendor => vendor.Name == stage.Vendor)?.Detail ?? stage.Name;
+            return $"{stage.Vendor}: " + (detail.StartsWith(stage.Name, StringComparison.Ordinal) ? detail : $"{stage.Name} · {detail}");
+        }));
+    public string SummaryText => $"Компонентов: {Stages.Count} · Обновлений: {Stages.Count(stage => stage.HasUpdate)} · Выбрано: {Stages.Count(stage => stage.CanSelectForUpdate && stage.IsSelectedForUpdate)}";
     public System.Windows.Input.ICommand CancelCommand => StopCommand;
     public System.Windows.Input.ICommand RefreshCommand => CheckAllCommand;
     public string RefreshTooltip => "Проверить все инструменты";
@@ -111,17 +140,25 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
         {
             if (SetProperty(ref field, value))
             {
+                if (!value) ShowActiveOnly = false;
                 OnPropertyChanged(nameof(CanStartRun));
                 OnPropertyChanged(nameof(IsBusy));
                 OnPropertyChanged(nameof(IsIndeterminate));
                 CheckAllCommand.NotifyCanExecuteChanged();
                 StopCommand.NotifyCanExecuteChanged();
                 RefreshUpdateButtonState();
+                RefreshOperationProgress();
             }
         }
     }
 
     private OperationState CurrentOperationState => UpdaterExecutionService.GetOperationState(_action, _checkOnly);
+
+    private void RefreshOperationProgress()
+    {
+        foreach (var property in new[] { nameof(RunTotal), nameof(QueuedCount), nameof(ActiveCount), nameof(CompletedCount), nameof(ProgressValue), nameof(ProgressMax), nameof(ProgressCaption), nameof(ActiveOperationText), nameof(StatusCaption), nameof(OperationTitle) })
+            OnPropertyChanged(property);
+    }
 
     public static string CheckSummary(IEnumerable<UpdateStage> stages) => UpdaterOutputParser.BuildCheckSummary(stages);
 
