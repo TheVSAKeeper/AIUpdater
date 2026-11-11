@@ -41,6 +41,11 @@ public partial class ChangelogWindow : Window
 
     public ChangelogViewModel ViewModel { get; }
 
+    private void TranslationSettings_Click(object sender, RoutedEventArgs e)
+    {
+        new TranslationAgentWindow(ViewModel.AgentSettings) { Owner = this }.ShowDialog();
+    }
+
     private void Window_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         if ((Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control)

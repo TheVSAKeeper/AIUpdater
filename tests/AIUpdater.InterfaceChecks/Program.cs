@@ -74,6 +74,10 @@ file static class Program
         view.Arrange(new(0, 0, width, height));
         view.UpdateLayout();
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        var background = new DrawingVisual();
+        using (var drawing = background.RenderOpen())
+            drawing.DrawRectangle((Brush)Application.Current.FindResource("WindowBrush"), null, new(0, 0, width, height));
+        bitmap.Render(background);
         bitmap.Render(view);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
@@ -138,9 +142,12 @@ file static class Program
         ((TextBox)changelog.FindName("ChangelogTextBox")).Text = "Пример содержимого окна «Что нового».\nПроверка тёмных рамок, списка, выделения и полосы прокрутки.";
         Render((FrameworkElement)changelog.Content, Path.Combine(output, "changelog.png"), 920, 600);
         Check(Descendants<ListBoxItem>(list).All(item => item.Template is not null), "Changelog rows lost their template");
-        ((Expander)changelog.FindName("TranslationAgentExpander")).IsExpanded = true;
         Render((FrameworkElement)changelog.Content, Path.Combine(output, "changelog-agent-settings.png"), 1120, 740);
-        Check(((ComboBox)changelog.FindName("TranslationAgentComboBox")).Items.Count == 4, "Agent settings did not expose four CLI backends");
+        Check(((Button)changelog.FindName("TranslationSettingsButton")).IsEnabled, "Translation settings button is unavailable");
+        Render((FrameworkElement)changelog.Content, Path.Combine(output, "changelog-agent-minimum.png"), 860, 540);
+        var settingsButton = (Button)changelog.FindName("TranslationSettingsButton");
+        var settingsPosition = settingsButton.TranslatePoint(new(), (UIElement)changelog.Content);
+        Check(settingsPosition.X >= 0 && settingsPosition.X + settingsButton.ActualWidth <= 860, "Translation settings are clipped in the narrow changelog window");
         changelog.Close();
         var dialog = AppDialog.Create(null, "Удалить выбранный компонент?", "Удаление компонента", true);
         ((Grid)dialog.Content).Background = dialog.Background;
@@ -595,6 +602,68 @@ file static class Program
         return task.GetAwaiter().GetResult();
     }
 
+    private static void CheckTranslationAgentSettings(string output)
+    {
+        var settings = new TranslationAgentSettings(Path.Combine(output, "agent-settings-ui.json"));
+        settings.Save(new());
+        var viewModel = new TranslationAgentViewModel(settings);
+        var dialog = new TranslationAgentWindow(viewModel);
+        var root = (FrameworkElement)dialog.Content;
+        Render(root, Path.Combine(output, "translation-settings.png"), 660, 580);
+        var agents = (ComboBox)dialog.FindName("TranslationAgentComboBox");
+        var model = (ComboBox)dialog.FindName("TranslationModelComboBox");
+        var effort = (ComboBox)dialog.FindName("TranslationEffortComboBox");
+        var executable = (TextBox)dialog.FindName("TranslationExecutablePathBox");
+        var automatic = (CheckBox)dialog.FindName("AutomaticTranslationCheckBox");
+        var editor = (TextBox)model.Template.FindName("PART_EditableTextBox", model);
+        Check(agents.Items.Count == 4 && viewModel.Backends.Any(agent => agent.Name == "Claude Code"), "Agent names are missing");
+        Check(agents.SelectionBoxItem.ToString() == "Antigravity", "Agent selector shows a technical record instead of its name");
+        Check(editor.Text == "gemini-3.8-flash-low", "Saved model is not visible in the input");
+        Check(effort.Text == "Низкий", "Effort is not shown with a readable title");
+        editor.Text = "custom-gemini-model";
+        Check(viewModel.Model == "custom-gemini-model", "Typing in the model input does not update the profile");
+        agents.SelectedValue = "codex";
+        editor.Text = "custom-codex-model";
+        effort.SelectedValue = "high";
+        executable.Text = @"C:\Agent Tools\codex.cmd";
+        automatic.IsChecked = false;
+        Check(viewModel.BackendId == "codex" && viewModel.Effort == "high", "Agent or effort selection did not update");
+        Check(settings.Current.BackendId == "antigravity", "Editing applied settings before Save");
+        agents.SelectedValue = "antigravity";
+        Check(editor.Text == "custom-gemini-model", "Switching agents discarded an unsaved model");
+        agents.SelectedValue = "codex";
+        Check(editor.Text == "custom-codex-model" && executable.Text == @"C:\Agent Tools\codex.cmd", "Agent draft did not round-trip");
+        viewModel.SaveCommand.Execute(null);
+        var loaded = new TranslationAgentSettings(settings.FilePath).Current;
+        Check(loaded.BackendId == "codex" && !loaded.Automatic && loaded.Profile.Effort == "high", "Save lost agent, effort or automatic mode");
+        Check(loaded.Profiles["antigravity"].Model == "custom-gemini-model", "Save lost the other agent draft");
+        Check(viewModel.SavedDescription.Contains("Codex") && viewModel.SavedDescription.Contains("custom-codex-model"), "Current agent summary is stale");
+        editor.SelectAll();
+        Render(root, Path.Combine(output, "translation-settings-selection.png"), 600, 520);
+        Check(model.ActualWidth >= 490 && editor.ActualHeight >= 20, "Model input is cramped at the minimum window size");
+        Check(editor.SelectionTextBrush == Application.Current.FindResource("TextBrush"), "Selected model text has unreadable colors");
+        foreach (var control in new FrameworkElement[] { agents, model, effort, executable, (Button)dialog.FindName("SaveTranslationSettingsButton") })
+        {
+            var position = control.TranslatePoint(new(), root);
+            Check(position.X >= 0 && position.X + control.ActualWidth <= root.ActualWidth + 1 && position.Y + control.ActualHeight <= root.ActualHeight + 1,
+                "Agent settings control is clipped at the minimum size");
+        }
+        executable.Text = Path.Combine(output, "missing-cli", "codex.exe");
+        Await(viewModel.DetectCommand.ExecuteAsync(null));
+        Check(viewModel.Status.StartsWith("Файл не найден") && viewModel.Model == "custom-codex-model", "Missing CLI did not produce a useful status or erased the model");
+        var fakeCliDirectory = Path.Combine(output, "fake-cli");
+        Directory.CreateDirectory(fakeCliDirectory);
+        var fakeCli = Path.Combine(fakeCliDirectory, "codex.cmd");
+        File.WriteAllText(fakeCli, "@echo codex 9.8.7\r\n");
+        executable.Text = fakeCli;
+        Await(viewModel.DetectCommand.ExecuteAsync(null));
+        Check(viewModel.DetectedPath == fakeCli && viewModel.Status.Contains("9.8.7") && editor.Text == "custom-codex-model", "CLI detection lost its path, version or manually entered model");
+        editor.Text = "discarded-model";
+        dialog.Close();
+        Check(viewModel.Model == "custom-codex-model" && settings.Current.Profile.Model == "custom-codex-model", "Cancel did not restore saved settings");
+        Console.WriteLine("PASS: translation settings input, profile drafts, effort labels, save, cancel, minimum layout");
+    }
+
     private static void CheckAgentTranslation(string output)
     {
         var settings = new TranslationAgentSettings(Path.Combine(output, "agent-profiles.json"));
@@ -800,6 +869,7 @@ file static class Program
         Click(logZoomOut);
         Check(Math.Abs(((TextBox)window.FindName("LogTextBox")).FontSize - initialLogSize) < 0.01, "Log zoom out did not restore font size");
         CheckChangelog(output, viewModel.Stages);
+        CheckTranslationAgentSettings(output);
         CheckAgentTranslation(output);
         var fixture = Path.Combine(output, "fixture.ps1");
         var calls = Path.Combine(output, "calls.txt");
