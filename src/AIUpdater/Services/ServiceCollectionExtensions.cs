@@ -15,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IChangelogFormatParser, DotNetReleasesChangelogParser>();
         services.AddSingleton<IChangelogFormatParser, NpmRegistryChangelogParser>();
         services.AddSingleton<IChangelogFormatParser, CodexAppChangelogParser>();
+        services.AddSingleton<IChangelogFormatParser, AntigravityDesktopChangelogParser>();
         services.AddSingleton<IChangelogFormatParser, HtmlChangelogParser>();
         services.AddSingleton<IChangelogFormatParser, MarkdownChangelogParser>();
 

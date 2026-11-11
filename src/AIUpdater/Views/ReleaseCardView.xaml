@@ -23,6 +23,11 @@
                                         Value="#302712" />
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Kind}"
+                                         Value="Prerelease">
+                                <Setter Property="Background"
+                                        Value="#2B1F2E" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Kind}"
                                          Value="Translated">
                                 <Setter Property="Background"
                                         Value="#162A22" />
@@ -42,6 +47,11 @@
                                              Value="Available">
                                     <Setter Property="Foreground"
                                             Value="#FCD34D" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Kind}"
+                                             Value="Prerelease">
+                                    <Setter Property="Foreground"
+                                            Value="#E5B8F4" />
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding Kind}"
                                              Value="Translated">
@@ -88,6 +98,7 @@
                                FontSize="{Binding TitleFontSize}"
                                FontWeight="SemiBold"
                                Foreground="{StaticResource TextBrush}"
+                               TextWrapping="Wrap"
                                Margin="0,0,10,2"
                                VerticalAlignment="Center" />
                     <TextBlock Text="{Binding PublishedAt}"

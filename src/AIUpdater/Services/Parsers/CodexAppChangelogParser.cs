@@ -24,7 +24,7 @@ public sealed class CodexAppChangelogParser : IChangelogFormatParser
         foreach (Match match in itemMatches)
         {
             var topics = match.Groups["topics"].Value;
-            if (!Regex.IsMatch(topics, @"\bcodex-app\b", RegexOptions.IgnoreCase))
+            if (!Regex.IsMatch(topics, @"\b(?:codex-app|general)\b", RegexOptions.IgnoreCase))
             {
                 continue;
             }
@@ -47,9 +47,12 @@ public sealed class CodexAppChangelogParser : IChangelogFormatParser
                 continue;
             }
 
-            var versionMatch = Regex.Match(title, @"\b(\d{2}\.\d+(?:\.\d+)*|\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b");
+            var versionMatch = Regex.Match(
+                title,
+                @"(?:Codex\s+app|ChatGPT(?:\s+app)?)\s+v?(?<ver>\d{2}\.\d+(?:\.\d+)*|\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b",
+                RegexOptions.IgnoreCase);
             var versionKey = versionMatch.Success
-                ? versionMatch.Groups[1].Value
+                ? versionMatch.Groups["ver"].Value
                 : !string.IsNullOrWhiteSpace(date) ? $"{date}-{title}" : title;
 
             var displayTitle = title.StartsWith("Codex app", StringComparison.OrdinalIgnoreCase)

@@ -36,12 +36,14 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
         _allStages = stages.ToArray();
         _state = new ChangelogPresentationState(UpdateTranslationBannerLiveText);
 
+        ToggleChannelCommand = new RelayCommand(ToggleChannel);
         ToggleLanguageCommand = new RelayCommand(ToggleLanguage);
         RefreshCommand = new AsyncRelayCommand(RefreshCurrentStageAsync);
         ZoomInCommand = new RelayCommand(() => SetBaseFontSize(BaseFontSize + 1));
         ZoomOutCommand = new RelayCommand(() => SetBaseFontSize(BaseFontSize - 1));
         ZoomResetCommand = new RelayCommand(() => SetBaseFontSize(DefaultFontSize));
         OpenSourceCommand = new RelayCommand(OpenSource, () => CanOpenSource);
+        UpdateChannelButtonState();
         UpdateLanguageButtonText();
 
         if (_allStages.Length > 0)
@@ -63,6 +65,8 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
     public string ZoomLabel => $"{(int)Math.Round(BaseFontSize / DefaultFontSize * 100)}%";
     public bool CanOpenSource => SourcePageUrl is not null;
     public bool IsCardsVisible => !IsRawTextVisible;
+    public bool HasLoadStatus => !string.IsNullOrWhiteSpace(LoadStatusText);
+    public IRelayCommand ToggleChannelCommand { get; }
     public IRelayCommand ToggleLanguageCommand { get; }
     public IAsyncRelayCommand RefreshCommand { get; }
     public IRelayCommand ZoomInCommand { get; }
@@ -77,6 +81,7 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref field, value) && value is not null && (!ReferenceEquals(value, _state.CurrentStage) || _state.CurrentDocument is null))
             {
+                SelectedChannel = ChangelogFormatter.GetDefaultChannel(value);
                 _ = LoadStageChangelogAsync(value, false);
             }
         }
@@ -107,10 +112,40 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
         }
     }
 
+    public ReleaseChannel SelectedChannel
+    {
+        get => _state.SelectedChannel;
+        private set
+        {
+            if (_state.SelectedChannel != value)
+            {
+                _state.SelectedChannel = value;
+                OnPropertyChanged();
+                UpdateChannelButtonState();
+            }
+        }
+    }
+
+    public bool HasChannelSwitch { get; private set => SetProperty(ref field, value); }
+    public string ChannelToggleText { get; private set => SetProperty(ref field, value); } = "Канал: Релизы";
+    public string ChannelToggleToolTip { get; private set => SetProperty(ref field, value); } = "Переключить между стабильными релизами и пререлизными сборками";
     public bool ShowTranslation { get; private set => SetProperty(ref field, value); } = true;
     public string LanguageToggleText { get; private set => SetProperty(ref field, value); } = "Язык: Русский (ИИ)";
     public string SourceNote { get; private set => SetProperty(ref field, value); } = "";
-    public string LoadStatusText { get; private set => SetProperty(ref field, value); } = "";
+    public string SourceInfoToolTip { get; private set => SetProperty(ref field, value); } = "";
+    public string SourceButtonToolTip { get; private set => SetProperty(ref field, value); } = "";
+
+    public string LoadStatusText
+    {
+        get;
+        private set
+        {
+            if (SetProperty(ref field, value))
+            {
+                OnPropertyChanged(nameof(HasLoadStatus));
+            }
+        }
+    } = "";
 
     public double BaseFontSize
     {
@@ -187,27 +222,39 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
             () => ShowTranslation = true);
     }
 
-    public Task<bool> TranslateReleaseOnDemandAsync(ChangelogRelease release, bool forceRetranslate = false) =>
-        _state.CurrentDocument is null
-            ? Task.FromResult(false)
-            : _state.TranslateReleaseAsync(
-                _changelogService,
-                _state.CurrentDocument,
-                release,
-                _state.CurrentStage,
-                forceRetranslate,
-                $"Выпусков: {_state.CurrentDocument.Releases.Count}",
-                RenderDocument,
-                status => LoadStatusText = status,
-                () => ShowTranslation = true,
-                _state.ActiveLoadToken);
+    public Task<bool> TranslateReleaseOnDemandAsync(ChangelogRelease release, bool forceRetranslate = false)
+    {
+        if (_state.CurrentDocument is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        var visibleCount = ChangelogFormatter.FilterReleasesByChannel(_state.CurrentDocument.Releases, _state.SelectedChannel).Count;
+        return _state.TranslateReleaseAsync(
+            _changelogService,
+            _state.CurrentDocument,
+            release,
+            _state.CurrentStage,
+            forceRetranslate,
+            $"Выпусков: {visibleCount}",
+            RenderDocument,
+            status => LoadStatusText = status,
+            () => ShowTranslation = true,
+            _state.ActiveLoadToken);
+    }
 
     public void RenderDocument(ChangelogDocument document, UpdateStage? stage = null)
     {
         _state.CurrentDocument = document;
         if (stage is not null)
         {
+            var switchedStage = !ReferenceEquals(_state.CurrentStage, stage);
             _state.CurrentStage = stage;
+            if (switchedStage)
+            {
+                SelectedChannel = ChangelogFormatter.GetDefaultChannel(stage);
+            }
+
             if (!ReferenceEquals(SelectedStage, stage) && (StagesView is null || StagesView.Cast<object>().Contains(stage)))
             {
                 SelectedStage = stage;
@@ -216,13 +263,36 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
             UpdateSourceHeader(stage);
         }
 
+        var activeStage = stage ?? _state.CurrentStage;
         ChangelogFormatter.EnsureSummaries(document.Releases);
+        UpdateChannelButtonState();
         UpdateLanguageButtonText();
-        RebuildReleaseCards(document.Releases, stage);
-        SetRawTextInternal(ChangelogFormatter.FormatAsPlainText(document.Releases, ShowTranslation));
+        var visibleReleases = ChangelogFormatter.FilterReleasesByChannel(document.Releases, _state.SelectedChannel);
+        RebuildReleaseCards(visibleReleases, activeStage);
+        SetRawTextInternal(ChangelogFormatter.FormatAsPlainText(visibleReleases, ShowTranslation));
+    }
+
+    public void SetSelectedChannel(ReleaseChannel channel)
+    {
+        if (channel is not (ReleaseChannel.Stable or ReleaseChannel.Prerelease) || SelectedChannel == channel)
+        {
+            return;
+        }
+
+        SelectedChannel = channel;
+        if (_state.CurrentDocument is not null)
+        {
+            RenderDocument(_state.CurrentDocument, _state.CurrentStage);
+            var visibleCount = ChangelogFormatter.FilterReleasesByChannel(_state.CurrentDocument.Releases, _state.SelectedChannel).Count;
+            LoadStatusText = $"Показано выпусков: {visibleCount}";
+            ScrollToHomeRequested?.Invoke();
+        }
     }
 
     public void Dispose() => _state.Dispose();
+
+    private void ToggleChannel() =>
+        SetSelectedChannel(SelectedChannel == ReleaseChannel.Prerelease ? ReleaseChannel.Stable : ReleaseChannel.Prerelease);
 
     private void ToggleLanguage()
     {
@@ -270,14 +340,28 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void UpdateChannelButtonState()
+    {
+        var document = _state.CurrentDocument;
+        HasChannelSwitch = ChangelogFormatter.HasMultipleChannels(document?.Releases);
+        ChannelToggleText = ChangelogFormatter.FormatChannelToggleText(_state.SelectedChannel, document);
+        ChannelToggleToolTip = _state.SelectedChannel == ReleaseChannel.Prerelease
+            ? "Сейчас показаны альфа- и пререлизные сборки. Нажмите, чтобы переключить на стабильные релизы"
+            : "Сейчас показаны стабильные релизы. Нажмите, чтобы переключить на альфа- и пререлизные сборки";
+    }
+
     private void UpdateLanguageButtonText() =>
-        LanguageToggleText = ChangelogFormatter.FormatLanguageToggleText(ShowTranslation, _state.CurrentDocument);
+        LanguageToggleText = ChangelogFormatter.FormatLanguageToggleText(ShowTranslation, _state.CurrentDocument, _state.SelectedChannel);
 
     private void UpdateSourceHeader(UpdateStage stage)
     {
         var source = stage.GetChangelogSource();
         SourceNote = source.Note;
         SourcePageUrl = source.PageUrl;
+        SourceInfoToolTip = $"{source.Note}\n\nЖурнал кэшируется на диске; кнопка «Обработать этот релиз» на карточке формирует краткое резюме и русский перевод через Antigravity Flash.";
+        SourceButtonToolTip = string.IsNullOrWhiteSpace(source.PageUrl)
+            ? source.Note
+            : $"{source.Note}\n{source.PageUrl}";
     }
 
     private void UpdateTranslationBannerLiveText()

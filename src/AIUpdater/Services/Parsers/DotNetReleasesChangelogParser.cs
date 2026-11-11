@@ -112,6 +112,7 @@ public sealed class DotNetReleasesChangelogParser : IChangelogFormatParser
                     ? $".NET {releaseVersion} (SDK {string.Join("; ", sdkVersions)})"
                     : $".NET {releaseVersion}",
                 PublishedAt = releaseDate,
+                IsPrerelease = ChangelogFormatter.IsPrereleaseVersion(versionKey) || ChangelogFormatter.IsPrereleaseVersion(releaseVersion),
                 Groups = groups,
             });
         }

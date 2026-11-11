@@ -45,23 +45,47 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <Grid Margin="0,0,0,14">
+        <Grid Margin="0,0,0,10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <StackPanel VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal"
+                        VerticalAlignment="Center">
                 <TextBlock Text="Что нового"
-                           FontSize="24"
-                           FontWeight="SemiBold" />
-                <TextBlock Text="История выпусков кэшируется на диске; кнопка «Обработать этот релиз» формирует краткие резюме и перевод через Antigravity Flash."
-                           Foreground="{StaticResource MutedBrush}"
-                           Margin="0,5,12,0"
-                           TextWrapping="Wrap" />
+                           FontSize="22"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center" />
+                <Border Width="20"
+                        Height="20"
+                        CornerRadius="10"
+                        Background="#162820"
+                        BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1"
+                        Margin="9,2,0,0"
+                        VerticalAlignment="Center"
+                        Cursor="Help"
+                        ToolTip="{Binding SourceInfoToolTip}"
+                        ToolTipService.InitialShowDelay="150">
+                    <TextBlock Text="i"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource MutedBrush}"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                </Border>
             </StackPanel>
             <StackPanel Grid.Column="1"
                         Orientation="Horizontal"
                         VerticalAlignment="Center">
+                <Button x:Name="ChannelToggleButton"
+                        Content="{Binding ChannelToggleText}"
+                        Command="{Binding ToggleChannelCommand}"
+                        Visibility="{Binding HasChannelSwitch, Converter={StaticResource BoolVisibility}}"
+                        MinHeight="30"
+                        Padding="12,5"
+                        Margin="0,0,8,0"
+                        ToolTip="{Binding ChannelToggleToolTip}" />
                 <Button x:Name="LanguageToggleButton"
                         Content="{Binding LanguageToggleText}"
                         Command="{Binding ToggleLanguageCommand}"
@@ -74,8 +98,15 @@
                         Command="{Binding RefreshCommand}"
                         MinHeight="30"
                         Padding="12,5"
-                        Margin="0,0,12,0"
+                        Margin="0,0,8,0"
                         ToolTip="Принудительно проверить наличие новых выпусков в источнике" />
+                <Button x:Name="SourceButton"
+                        Content="Источник ↗"
+                        Command="{Binding OpenSourceCommand}"
+                        MinHeight="30"
+                        Padding="12,5"
+                        Margin="0,0,12,0"
+                        ToolTip="{Binding SourceButtonToolTip}" />
                 <Button x:Name="ZoomOutButton"
                         Content="A-"
                         Command="{Binding ZoomOutCommand}"
@@ -158,22 +189,17 @@
             <Grid Grid.Column="1">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <TextBlock x:Name="SourceNoteText"
-                           Text="{Binding SourceNote}"
-                           Foreground="{StaticResource MutedBrush}"
-                           TextWrapping="Wrap"
-                           Margin="0,0,0,4" />
                 <TextBlock x:Name="LoadStatusText"
-                           Grid.Row="1"
                            Text="{Binding LoadStatusText}"
+                           FontSize="12"
                            Foreground="{StaticResource AccentTextBrush}"
-                           Margin="0,0,0,8"
-                           TextWrapping="Wrap" />
-                <Border Grid.Row="2"
+                           Margin="0,0,0,6"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           Visibility="{Binding HasLoadStatus, Converter={StaticResource BoolVisibility}}" />
+                <Border Grid.Row="1"
                         Background="#0A1410"
                         BorderBrush="{StaticResource BorderBrush}"
                         BorderThickness="1"
@@ -202,18 +228,6 @@
                                  Visibility="{Binding IsRawTextVisible, Converter={StaticResource BoolVisibility}}" />
                     </Grid>
                 </Border>
-                <StackPanel Grid.Row="3"
-                            Orientation="Horizontal"
-                            HorizontalAlignment="Right"
-                            Margin="0,12,0,0">
-                    <Button x:Name="SourceButton"
-                            Content="Открыть источник"
-                            Command="{Binding OpenSourceCommand}"
-                            ToolTip="{Binding SourcePageUrl}"
-                            Margin="0,0,10,0" />
-                    <Button Content="Закрыть"
-                            Click="CloseButton_Click" />
-                </StackPanel>
             </Grid>
         </Grid>
     </Grid>

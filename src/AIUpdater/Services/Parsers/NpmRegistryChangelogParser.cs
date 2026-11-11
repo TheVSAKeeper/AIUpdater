@@ -59,9 +59,31 @@ public sealed class NpmRegistryChangelogParser : IChangelogFormatParser
             .ToList();
 
         var releases = new List<ChangelogRelease>();
-        for (var index = 0; index < Math.Min(10, allVersions.Count); index++)
+        var stableCount = 0;
+        var prereleaseCount = 0;
+        for (var index = 0; index < allVersions.Count && (stableCount < 10 || prereleaseCount < 10); index++)
         {
             var current = allVersions[index];
+            var isPrerelease = ChangelogFormatter.IsPrereleaseVersion(current.Version);
+            if (isPrerelease)
+            {
+                if (prereleaseCount >= 10)
+                {
+                    continue;
+                }
+
+                prereleaseCount++;
+            }
+            else
+            {
+                if (stableCount >= 10)
+                {
+                    continue;
+                }
+
+                stableCount++;
+            }
+
             var previous = index + 1 < allVersions.Count ? allVersions[index + 1] : default;
             var added = new List<string>();
             var changed = new List<string>();
@@ -142,6 +164,7 @@ public sealed class NpmRegistryChangelogParser : IChangelogFormatParser
                 Version = current.Version,
                 Title = $"DeepSeek Harness v{current.Version}",
                 PublishedAt = current.Time > DateTimeOffset.MinValue ? current.Time.ToString("yyyy-MM-dd") : null,
+                IsPrerelease = isPrerelease,
                 Groups = groups,
             });
         }

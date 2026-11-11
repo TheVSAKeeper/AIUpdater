@@ -40,13 +40,15 @@ public sealed class AgyChangelogTranslator(
             return false;
         }
 
-        var (translatedGroups, translatedSummary) = ParseTranslatedRelease(rawTranslation, release.Groups);
+        var (translatedGroups, translatedSummary, translatedTitle) = ParseTranslatedRelease(rawTranslation, release.Groups);
         if (translatedGroups.Count == 0)
         {
             return false;
         }
 
-        release.TranslatedTitle = string.IsNullOrWhiteSpace(release.Title) ? release.Version : release.Title;
+        release.TranslatedTitle = !string.IsNullOrWhiteSpace(translatedTitle)
+            ? translatedTitle
+            : string.IsNullOrWhiteSpace(release.Title) ? release.Version : release.Title;
         release.TranslatedSummary = !string.IsNullOrWhiteSpace(translatedSummary)
             ? translatedSummary
             : ChangelogFormatter.BuildReleaseSummary(translatedGroups);
@@ -59,13 +61,19 @@ public sealed class AgyChangelogTranslator(
         var promptBuilder = new StringBuilder();
         promptBuilder.AppendLine("Переведи на русский язык список изменений релиза ПО и составь краткие резюме.");
         promptBuilder.AppendLine("Правила:");
-        promptBuilder.AppendLine("1. Сначала выведи секцию [Summary] и 1–2 лаконичных предложения на русском языке с общим резюме релиза.");
-        promptBuilder.AppendLine("2. Далее сохраняй заголовки секций строго в квадратных скобках: [Added], [Changed], [Fixed], [Security], [Other].");
-        promptBuilder.AppendLine("3. Сразу под заголовком каждой секции выведи строку \"Summary: <краткая суть этого блока в одну строку>\".");
-        promptBuilder.AppendLine("4. Каждый пункт изменений начинай с \"- \".");
-        promptBuilder.AppendLine("5. Названия пакетов, команд, флагов CLI, API и фрагменты кода в `обратных кавычках` не переводи.");
-        promptBuilder.AppendLine("6. Не добавляй вступлений, пояснений или заключений.");
+        promptBuilder.AppendLine("1. Первой строкой выведи \"Title: <заголовок релиза на русском языке с сохранением номера версии и названий продуктов/команд>\" (если заголовок состоит только из версии и названия программы, оставь его как есть).");
+        promptBuilder.AppendLine("2. Далее выведи секцию [Summary] и 1–2 лаконичных предложения на русском языке с общим резюме релиза.");
+        promptBuilder.AppendLine("3. Далее сохраняй заголовки секций строго в квадратных скобках: [Added], [Changed], [Fixed], [Security], [Other].");
+        promptBuilder.AppendLine("4. Сразу под заголовком каждой секции выведи строку \"Summary: <краткая суть этого блока в одну строку>\".");
+        promptBuilder.AppendLine("5. Каждый пункт изменений начинай с \"- \".");
+        promptBuilder.AppendLine("6. Названия пакетов, команд, флагов CLI, API и фрагменты кода в `обратных кавычках` не переводи.");
+        promptBuilder.AppendLine("7. Не добавляй вступлений, пояснений или заключений.");
         promptBuilder.AppendLine();
+        if (!string.IsNullOrWhiteSpace(release.Title))
+        {
+            promptBuilder.AppendLine($"Original Title: {release.Title}");
+            promptBuilder.AppendLine();
+        }
 
         foreach (var group in release.Groups)
         {
@@ -90,13 +98,14 @@ public sealed class AgyChangelogTranslator(
         return promptBuilder.ToString();
     }
 
-    private static (List<ChangelogGroup> Groups, string? Summary) ParseTranslatedRelease(
+    private static (List<ChangelogGroup> Groups, string? Summary, string? Title) ParseTranslatedRelease(
         string translatedText,
         List<ChangelogGroup> originalGroups)
     {
         var buckets = ChangelogParseHelper.OrderedCategories.ToDictionary(category => category, _ => new List<string>());
         var groupSummaries = new Dictionary<ChangeCategory, string>();
         var releaseSummaryLines = new List<string>();
+        string? translatedTitle = null;
         var inReleaseSummary = false;
 
         var currentCategory = originalGroups.FirstOrDefault()?.Category ?? ChangeCategory.Changed;
@@ -105,6 +114,13 @@ public sealed class AgyChangelogTranslator(
             var line = rawLine.Trim().Replace('\u2014', '–');
             if (line.StartsWith("```", StringComparison.Ordinal))
             {
+                continue;
+            }
+
+            var titleLineMatch = Regex.Match(line, @"^(?:Title|Заголовок)\s*:\s*(?<title>.+)$", RegexOptions.IgnoreCase);
+            if (titleLineMatch.Success && translatedTitle is null)
+            {
+                translatedTitle = titleLineMatch.Groups["title"].Value.Trim();
                 continue;
             }
 
@@ -183,7 +199,7 @@ public sealed class AgyChangelogTranslator(
             ? string.Join(" ", releaseSummaryLines)
             : result.Count > 0 ? ChangelogFormatter.BuildReleaseSummary(result) : null;
 
-        return (result, releaseSummary);
+        return (result, releaseSummary, translatedTitle);
     }
 
     private async Task<string?> InvokeAgyFlashTranslationAsync(string prompt, CancellationToken cancellationToken)

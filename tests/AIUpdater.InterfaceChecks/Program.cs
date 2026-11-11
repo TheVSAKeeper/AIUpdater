@@ -185,7 +185,7 @@ file static class Program
     {
         using var provider = ServiceCollectionExtensions.CreateDefaultServiceProvider();
         var parsers = provider.GetServices<IChangelogFormatParser>().ToArray();
-        Check(parsers.Length == 8, "DI container did not register all 8 IChangelogFormatParser strategies");
+        Check(parsers.Length == 9, "DI container did not register all 9 IChangelogFormatParser strategies");
         var resolvedMainVm = provider.GetRequiredService<MainViewModel>();
         using var resolvedChangelogVm = provider.GetRequiredService<ChangelogViewModel>();
         Check(resolvedMainVm.Stages.Count == 17 && resolvedChangelogVm.HasStages, "DI container did not resolve MainViewModel and ChangelogViewModel");
@@ -233,6 +233,14 @@ file static class Program
                   <ul><li>Fixed CLI crash on startup.</li></ul>
                 </article>
               </li>
+              <li data-codex-topics="general">
+                <time>2026-10-26</time>
+                <h3>GPT-6.1 Terra in Work and Codex</h3>
+                <article>
+                  <p>GPT-6.1 Terra is now available across ChatGPT Work and
+                  the Codex desktop application.</p>
+                </article>
+              </li>
               <li data-codex-topics="codex-app">
                 <time>2026-10-08</time>
                 <h3>Codex app 26.1007</h3>
@@ -240,20 +248,54 @@ file static class Program
                   <h2>New features</h2>
                   <ul><li>Add, preview, and remove attachments without leaving the full-screen composer.</li></ul>
                   <h2>Improvements and bug fixes</h2>
-                  <ul><li>Fixed window focus issue when switching threads in ChatGPT Desktop.</li></ul>
+                  <ul><li>Fixed window focus issue when switching
+                  threads in ChatGPT Desktop.</li></ul>
                 </article>
               </li>
             </ul>
             """;
         var codexAppParsed = changelogService.ParseReleases(codexAppHtml, "codex-app");
-        Check(codexAppParsed.Count == 1
-              && codexAppParsed[0].Version == "26.1007"
-              && codexAppParsed[0].Title.Contains("Codex app 26.1007", StringComparison.Ordinal)
-              && codexAppParsed[0].Groups.Count == 2
-              && codexAppParsed[0].Groups.Any(g => g.Category == ChangeCategory.Added)
-              && codexAppParsed[0].Groups.Any(g => g.Category == ChangeCategory.Fixed)
-              && codexAppParsed[0].Summary is null,
-            "codex-app parser failed to filter out codex-cli, split New features / Bug fixes, or injected mechanical summary before AI processing");
+        Check(codexAppParsed.Count == 2
+              && codexAppParsed[0].PublishedAt == "2026-10-26"
+              && codexAppParsed[0].Title.Contains("GPT-6.1 Terra", StringComparison.Ordinal)
+              && codexAppParsed[1].Version == "26.1007"
+              && codexAppParsed[1].Title.Contains("Codex app 26.1007", StringComparison.Ordinal)
+              && codexAppParsed[1].Groups.Count == 2
+              && codexAppParsed[1].Groups.Any(g => g.Category == ChangeCategory.Added)
+              && codexAppParsed[1].Groups.Any(g => g.Category == ChangeCategory.Fixed && g.Items.Contains("Fixed window focus issue when switching threads in ChatGPT Desktop."))
+              && codexAppParsed[1].Summary is null,
+            "codex-app parser failed to include general topics, preserve wrapped HTML sentences, filter out codex-cli, or split New features / Bug fixes");
+        Check(ChangelogFormatter.VersionsMatch("26.1007", "26.1007.7773.0") && !ChangelogFormatter.VersionsMatch("26.1007", "26.1103.7773.0"),
+            "CalVer MSIX 4-part version matching failed");
+
+        var antigravityHubHtml = """
+            <section id="panel-hub">
+              <article class="rn-row release-entry" id="rel-hub-2.31.0">
+                <time class="rn-date-text">November 9, 2026</time>
+                <div class="rn-card">
+                  <h3 class="rn-headline">/swarm and split-view plugins</h3>
+                  <div class="rn-summary"><p>Adds multi-agent swarm support and split view.</p></div>
+                  <div class="rn-categories">
+                    <details><summary>Improvements (1)</summary><ul><li>Added /swarm command support.</li></ul></details>
+                    <details><summary>Fixes (1)</summary><ul><li>Fixed browser download prompt.</li></ul></details>
+                  </div>
+                </div>
+              </article>
+            </section>
+            <section id="panel-cli">
+              <article class="rn-row release-entry" id="rel-cli-1.5.5">
+                <time class="rn-date-text">November 10, 2026</time>
+                <div class="rn-card"><h3 class="rn-headline">CLI 1.5.5</h3><details><summary>Fixes (1)</summary><ul><li>CLI only fix.</li></ul></details></div>
+              </article>
+            </section>
+            """;
+        var agDesktopParsed = changelogService.ParseReleases(antigravityHubHtml, "antigravity-desktop");
+        Check(agDesktopParsed.Count == 1
+              && agDesktopParsed[0].Version == "2.31.0"
+              && agDesktopParsed[0].PublishedAt == "2026-11-09"
+              && agDesktopParsed[0].Summary == "Adds multi-agent swarm support and split view."
+              && agDesktopParsed[0].Groups.Count == 2,
+            "antigravity-desktop parser failed to isolate panel-hub articles from CLI entries or parse date/summary");
 
         var nodeMd = """
             ## 2026-10-28, Version 22.22.2 'Jod' (LTS)
@@ -449,6 +491,98 @@ file static class Program
         Check(zoomResetBtn.Content.ToString() != "100%", "Changelog zoom in did not update zoom percentage");
         Click(zoomResetBtn);
         Check(zoomResetBtn.Content.ToString() == "100%", "Changelog zoom reset did not restore 100%");
+
+        var sourceBtn = (Button)changelogWindow.FindName("SourceButton");
+        var changelogRoot = (FrameworkElement)changelogWindow.Content;
+        changelogRoot.Measure(new(1120, 740));
+        changelogRoot.Arrange(new(0, 0, 1120, 740));
+        changelogRoot.UpdateLayout();
+        Check(sourceBtn.TranslatePoint(new(0, 0), changelogRoot).Y < 60, "SourceButton was not relocated to the ChangelogWindow header");
+        Check(!Descendants<Button>(changelogRoot).Any(b => Equals(b.Content, "Закрыть")), "Redundant Close button still exists in ChangelogWindow");
+
+        var stubFetcher = new StubChangelogContentFetcher(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["https://api.github.com/repos/openai/codex/releases?per_page=60"] = """
+                [
+                  {"tag_name":"rust-v0.169.0-alpha.9","name":"Release 0.169.0-alpha.9","prerelease":true,"html_url":"https://github.com/openai/codex/releases/tag/rust-v0.169.0-alpha.9","published_at":"2026-11-10T10:00:00Z","body":"Release 0.169.0-alpha.9"},
+                  {"tag_name":"rust-v0.169.0-alpha.10","name":"Release 0.169.0-alpha.10","prerelease":true,"html_url":"https://github.com/openai/codex/releases/tag/rust-v0.169.0-alpha.10","published_at":"2026-11-10T11:00:00Z","body":"Release 0.169.0-alpha.10"},
+                  {"tag_name":"libcap-v2.75","name":"libcap 2.75","prerelease":true,"published_at":"2026-11-09T10:00:00Z","body":"Dependency"},
+                  {"tag_name":"rust-v0.167.1","name":"0.167.1","prerelease":false,"html_url":"https://github.com/openai/codex/releases/tag/rust-v0.167.1","published_at":"2026-11-10T09:00:00Z","body":"## Changelog\nFull Changelog: https://github.com/openai/codex/compare/rust-v0.167.0...rust-v0.167.1"},
+                  {"tag_name":"rust-v0.167.0","name":"0.167.0","prerelease":false,"html_url":"https://github.com/openai/codex/releases/tag/rust-v0.167.0","published_at":"2026-11-06T09:00:00Z","body":"### New Features\n- Added multi-agent worktree support"}
+                ]
+                """,
+            ["https://api.github.com/repos/openai/codex/compare/rust-v0.167.0...rust-v0.167.1"] = """
+                {"commits":[{"commit":{"message":"fix: restrict legacy incremental tools (#60040)"}},{"commit":{"message":"feat: add opt-in incremental tools for Responses (#59832)"}}]}
+                """,
+            ["https://api.github.com/repos/openai/codex/compare/rust-v0.169.0-alpha.9...rust-v0.169.0-alpha.10"] = """
+                {"commits":[{"commit":{"message":"feat(tui): stream subagent progress in status bar"}}]}
+                """,
+            ["https://api.github.com/repos/openai/codex/compare/rust-v0.167.1...rust-v0.169.0-alpha.9"] = """
+                {"commits":[{"commit":{"message":"fix(core): avoid duplicate tool retries"}}]}
+                """,
+            ["https://developers.openai.com/codex/changelog/"] = codexAppHtml,
+            ["https://api.github.com/repos/google-antigravity/antigravity-cli/releases?per_page=15"] = """
+                [
+                  {"tag_name":"v1.5.5","name":"1.5.5","prerelease":false,"published_at":"2026-11-10T12:00:00Z","body":"### Fixes\n- Fixed MCP reconnect handling"},
+                  {"tag_name":"v1.5.4","name":"1.5.4","prerelease":false,"published_at":"2026-11-09T12:00:00Z","body":"### Features\n- Added headless JSON output"}
+                ]
+                """,
+        });
+        var stubService = new ChangelogService(stubFetcher, parsers, new FileChangelogRepository(Path.Combine(output, "stub-cache")), new AgyChangelogTranslator(stubFetcher));
+
+        var isolatedStages = UpdateStage.CreateCatalog();
+        var codexCliStage = isolatedStages.First(s => s.Id == "Active Codex CLI");
+        codexCliStage.SetCheckResult("CURRENT", "0.167.1", "0.167.1");
+        var (codexDoc, _) = AwaitResult(stubService.LoadDocumentAsync(codexCliStage, true, CancellationToken.None));
+        Check(!codexDoc.Releases.Any(r => r.Version.Contains("2.75", StringComparison.Ordinal)),
+            "Non-CLI dependency tag libcap-v2.75 leaked into Codex CLI releases");
+        var patch01671 = codexDoc.Releases.Single(r => r.Version == "0.167.1");
+        Check(!patch01671.Groups.SelectMany(g => g.Items).Any(i => i.StartsWith("Опубликован выпуск", StringComparison.Ordinal))
+              && patch01671.Groups.Any(g => g.Category == ChangeCategory.Added),
+            "Compare commit enrichment did not replace placeholder text on 0.167.1");
+
+        changelogVm.RenderDocument(codexDoc, codexCliStage);
+        var channelBtn = (Button)changelogWindow.FindName("ChannelToggleButton");
+        changelogRoot.UpdateLayout();
+        Check(changelogVm.HasChannelSwitch
+              && channelBtn.Visibility == Visibility.Visible
+              && changelogVm.SelectedChannel == ReleaseChannel.Stable
+              && changelogVm.Releases.Count == 2
+              && changelogVm.Releases[0].ReleaseKey == "0.167.1",
+            "Stable-installed Codex CLI did not default to Stable channel or mixed alpha releases");
+        Click(channelBtn);
+        Check(changelogVm.SelectedChannel == ReleaseChannel.Prerelease
+              && changelogVm.Releases.Count == 2
+              && changelogVm.Releases[0].ReleaseKey == "0.169.0-alpha.10"
+              && changelogVm.Releases[1].ReleaseKey == "0.169.0-alpha.9"
+              && !changelogVm.Releases[0].Groups.SelectMany(g => g.Items).Any(i => i.StartsWith("Опубликован выпуск", StringComparison.Ordinal)),
+            "Switching to Prerelease channel did not order alpha.10 before alpha.9 or missed compare commit descriptions");
+
+        var codexNpmStage = isolatedStages.First(s => s.Id == "Codex npm package");
+        codexNpmStage.SetCheckResult("CURRENT", "0.169.0-alpha.10", "0.169.0-alpha.10");
+        changelogVm.RenderDocument(codexDoc, codexNpmStage);
+        Check(changelogVm.SelectedChannel == ReleaseChannel.Prerelease,
+            "Prerelease-installed stage did not auto-select Prerelease channel");
+
+        var codexDesktopStage = isolatedStages.First(s => s.Id == "Codex desktop");
+        codexDesktopStage.SetCheckResult("AVAILABLE", "26.1103.7773.0", info: "Microsoft Store не передаёт номер новой версии до установки");
+        var (codexDesktopDoc, _) = AwaitResult(stubService.LoadDocumentAsync(codexDesktopStage, true, CancellationToken.None));
+        changelogVm.RenderDocument(codexDesktopDoc, codexDesktopStage);
+        Check(codexDesktopDoc.Releases[0].Version == "26.1103.7773.0"
+              && codexDesktopDoc.Releases[0].PublishedAt == "2026-11-03"
+              && changelogVm.Releases[0].Badges.Any(b => b.Text == "Установлено")
+              && changelogVm.Releases[0].Badges.Any(b => b.Text == "Есть обновление"),
+            "Codex desktop did not prepend installed/available Microsoft Store build card");
+
+        var isolatedAgyStage = isolatedStages.First(s => s.Id == "Antigravity CLI");
+        isolatedAgyStage.SetCheckResult("CURRENT", "1.5.5", "1.5.5");
+        var (agyGhDoc, _) = AwaitResult(stubService.LoadDocumentAsync(isolatedAgyStage, true, CancellationToken.None));
+        Check(agyGhDoc.Releases.Count == 2
+              && agyGhDoc.Releases[0].Version == "1.5.5"
+              && agyGhDoc.Releases[0].Title == "Antigravity CLI v1.5.5"
+              && !agyGhDoc.Releases.Any(r => r.Version.StartsWith("2.", StringComparison.Ordinal)),
+            "Antigravity CLI did not load 1.5.5 from GitHub releases or mixed Desktop 2.x entries");
+
         changelogWindow.Close();
     }
 
@@ -699,5 +833,27 @@ file static class Program
         Console.WriteLine("PASS: application control templates, checkbox states and accessible toggle, text menu, changelog layout, themed confirmation with safe default");
         CheckIcon(darkOutput);
         Console.WriteLine("PASS: packaged ICO sizes, transparency and nonempty frames");
+    }
+
+    private sealed class StubChangelogContentFetcher(IReadOnlyDictionary<string, string> responses) : IChangelogContentFetcher
+    {
+        public Task<string> FetchAsync(ChangelogSource source, CancellationToken cancellationToken) =>
+            DownloadUrlAsync(source.DownloadUrl ?? "", cancellationToken);
+
+        public async Task<(string Content, string? ETag, bool NotModified)> FetchWithETagAsync(
+            ChangelogSource source,
+            string? cachedETag,
+            CancellationToken cancellationToken) =>
+            (await DownloadUrlAsync(source.DownloadUrl ?? "", cancellationToken), "\"stub-etag\"", false);
+
+        public Task<string> DownloadUrlAsync(string url, CancellationToken cancellationToken) =>
+            responses.TryGetValue(url, out var content)
+                ? Task.FromResult(content)
+                : throw new System.Net.Http.HttpRequestException($"Unexpected URL in stub fetcher: {url}");
+
+        public string? FindAgyExecutable() => null;
+
+        public Task<string> RunCommandAsync(string executable, IReadOnlyList<string> arguments, int timeoutSeconds, CancellationToken cancellationToken) =>
+            Task.FromResult("");
     }
 }

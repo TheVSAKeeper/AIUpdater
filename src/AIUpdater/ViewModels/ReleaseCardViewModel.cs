@@ -133,7 +133,7 @@ public sealed class ReleaseCardViewModel : ObservableObject
 
     public bool HasTranslationError => !IsTranslating && !string.IsNullOrWhiteSpace(TranslationErrorText);
 
-    public bool CanProcess => !IsTranslating && !Release.HasTranslation;
+    public bool CanProcess => !IsTranslating && !Release.HasTranslation && !ChangelogFormatter.IsPrimarilyRussian(Release);
 
     public string ProcessButtonText { get; }
 

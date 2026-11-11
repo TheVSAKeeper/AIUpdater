@@ -33,6 +33,7 @@ public sealed class AgyCliChangelogParser : IChangelogFormatParser
                 {
                     Version = version,
                     Title = $"Antigravity CLI v{version}",
+                    IsPrerelease = ChangelogFormatter.IsPrereleaseVersion(version),
                     Groups = groups,
                 });
             }

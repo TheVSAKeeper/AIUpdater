@@ -1,4 +1,5 @@
 ﻿using AIUpdater.Models;
+using AIUpdater.Services.Parsers;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -98,11 +99,21 @@ public sealed class FileChangelogRepository(string? cacheDirectory = null) : ICh
             if (!string.IsNullOrEmpty(key))
             {
                 seen.Add(key);
-                if (cachedByKey.TryGetValue(key, out var previous) && previous.HasTranslation && !item.HasTranslation)
+                if (cachedByKey.TryGetValue(key, out var previous))
                 {
-                    item.TranslatedTitle = previous.TranslatedTitle;
-                    item.TranslatedSummary = previous.TranslatedSummary;
-                    item.TranslatedGroups = previous.TranslatedGroups;
+                    if (ChangelogParseHelper.IsPlaceholderOnlyGroups(item.Groups)
+                        && !ChangelogParseHelper.IsPlaceholderOnlyGroups(previous.Groups))
+                    {
+                        item.Groups = previous.Groups;
+                        item.CompareUrl = null;
+                    }
+
+                    if (previous.HasTranslation && !item.HasTranslation)
+                    {
+                        item.TranslatedTitle = previous.TranslatedTitle;
+                        item.TranslatedSummary = previous.TranslatedSummary;
+                        item.TranslatedGroups = previous.TranslatedGroups;
+                    }
                 }
             }
 
@@ -118,8 +129,45 @@ public sealed class FileChangelogRepository(string? cacheDirectory = null) : ICh
             }
         }
 
-        var result = merged.Take(20).ToList();
+        var result = LimitMergedReleases(merged);
         ChangelogFormatter.EnsureSummaries(result);
+        return result;
+    }
+
+    private static List<ChangelogRelease> LimitMergedReleases(List<ChangelogRelease> merged)
+    {
+        if (!ChangelogFormatter.HasMultipleChannels(merged))
+        {
+            return merged.Take(20).ToList();
+        }
+
+        var result = new List<ChangelogRelease>(merged.Count);
+        var stableCount = 0;
+        var prereleaseCount = 0;
+        foreach (var item in merged)
+        {
+            if (item.IsPrerelease)
+            {
+                if (prereleaseCount >= 15)
+                {
+                    continue;
+                }
+
+                prereleaseCount++;
+            }
+            else
+            {
+                if (stableCount >= 15)
+                {
+                    continue;
+                }
+
+                stableCount++;
+            }
+
+            result.Add(item);
+        }
+
         return result;
     }
 

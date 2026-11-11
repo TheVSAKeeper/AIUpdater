@@ -1,4 +1,5 @@
 ﻿using AIUpdater.Models;
+using System.Globalization;
 using System.Net;
 using System.Text.RegularExpressions;
 
@@ -55,7 +56,9 @@ public static class ChangelogParseHelper
             }
 
             if (IsCategoryHeading(cleaned)
-                || Regex.IsMatch(cleaned, @"^(?:Latest|Today|View\s+details|\d{4}-\d{2}-\d{2})$", RegexOptions.IgnoreCase))
+                || Regex.IsMatch(cleaned, @"^(?:Latest|Today|View\s+details|Full\s+release\s+on\s+GitHub|\d{4}-\d{2}-\d{2})$", RegexOptions.IgnoreCase)
+                || Regex.IsMatch(cleaned, @"^Release\s+v?\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z._-]+)?$", RegexOptions.IgnoreCase)
+                || Regex.IsMatch(cleaned, @"^\$\s*(?:npm|pnpm|yarn|brew|winget|curl|irm)\b", RegexOptions.IgnoreCase))
             {
                 if (IsCategoryHeading(cleaned) && !cleaned.Equals("View details", StringComparison.OrdinalIgnoreCase))
                 {
@@ -105,9 +108,19 @@ public static class ChangelogParseHelper
         return groups;
     }
 
+    public static bool IsPlaceholderOnlyGroups(IReadOnlyList<ChangelogGroup>? groups)
+    {
+        return groups is null
+               || groups.Count == 0
+               || (groups.Count == 1
+                   && groups[0].Items.Count == 1
+                   && groups[0].Items[0].StartsWith("Опубликован выпуск ", StringComparison.Ordinal));
+    }
+
     public static string HtmlToMarkdownLines(string html)
     {
-        var text = Regex.Replace(html, @"<(script|style|nav|footer|svg|noscript|button)\b[^>]*>[\s\S]*?</\1>", "", RegexOptions.IgnoreCase);
+        var text = Regex.Replace(html, @"<(script|style|nav|footer|svg|noscript|button|pre)\b[^>]*>[\s\S]*?</\1>", "", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"\s+", " ");
         text = Regex.Replace(text, @"<h[1-3]\b[^>]*>([\s\S]*?)</h[1-3]>", m =>
         {
             var h = StripTags(m.Groups[1].Value);
@@ -120,7 +133,8 @@ public static class ChangelogParseHelper
         text = Regex.Replace(text, @"<(br|p|/p|/div|/li|/tr|/section|/article|/details)\b[^>]*>", "\n", RegexOptions.IgnoreCase);
         text = WebUtility.HtmlDecode(Regex.Replace(text, "<[^>]+>", " "));
         text = Regex.Replace(text, @"[ \t]+", " ");
-        text = Regex.Replace(text, @"\n\s*\n\s*\n+", "\n\n");
+        text = Regex.Replace(text, @" *\n *", "\n");
+        text = Regex.Replace(text, @"\n{3,}", "\n\n");
         return text.Trim();
     }
 
@@ -145,7 +159,13 @@ public static class ChangelogParseHelper
             return null;
         }
 
-        return DateTimeOffset.TryParse(raw, out var dto) ? dto.ToString("yyyy-MM-dd") : raw;
+        if (DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var dto)
+            || DateTimeOffset.TryParse(raw, CultureInfo.CurrentCulture, DateTimeStyles.AllowWhiteSpaces, out dto))
+        {
+            return dto.ToString("yyyy-MM-dd");
+        }
+
+        return raw;
     }
 
     private static ChangeCategory ClassifyHeading(string heading)

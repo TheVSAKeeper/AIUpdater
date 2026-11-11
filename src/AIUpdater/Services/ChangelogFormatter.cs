@@ -45,6 +45,8 @@ public sealed class ChangelogPresentationState : IDisposable
 
     public UpdateStage? CurrentStage { get; set; }
 
+    public ReleaseChannel SelectedChannel { get; set; } = ReleaseChannel.Stable;
+
     public HashSet<string> CollapsedGroupKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public HashSet<string> CollapsedReleaseKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -83,6 +85,7 @@ public sealed class ChangelogPresentationState : IDisposable
             CollapsedReleaseKeys.Clear();
             OriginalOverrideReleaseKeys.Clear();
             TranslationErrors.Clear();
+            SelectedChannel = ChangelogFormatter.GetDefaultChannel(stage);
         }
 
         CurrentStage = stage;
@@ -199,19 +202,18 @@ public sealed class ChangelogPresentationState : IDisposable
             onRender(document, stage);
             onScrollHome();
 
-            var latest = document.Releases.FirstOrDefault();
+            var visibleReleases = ChangelogFormatter.FilterReleasesByChannel(document.Releases, SelectedChannel);
+            var latestToTranslate = visibleReleases
+                .Take(2)
+                .FirstOrDefault(release => !release.HasTranslation && !ChangelogFormatter.IsPrimarilyRussian(release));
             var statusPrefix = fromCacheOnly
-                ? $"Из кэша ({document.UpdatedAt.ToLocalTime():dd.MM.yyyy HH:mm}, выпусков: {document.Releases.Count})"
-                : $"Загружено выпусков: {document.Releases.Count}";
+                ? $"Из кэша ({document.UpdatedAt.ToLocalTime():dd.MM.yyyy HH:mm}, выпусков: {visibleReleases.Count})"
+                : $"Загружено выпусков: {visibleReleases.Count}";
 
-            if (latest is not null && !latest.HasTranslation && !ChangelogFormatter.IsPrimarilyRussian(latest))
+            if (latestToTranslate is not null)
             {
                 onStatus(statusPrefix + " · Обработка свежего выпуска через Antigravity Flash…");
-                await TranslateReleaseAsync(service, document, latest, stage, false, statusPrefix, onRender, onStatus, onTranslated, token);
-            }
-            else if (latest is { HasTranslation: true })
-            {
-                onStatus(statusPrefix + " · Свежий выпуск обработан ИИ");
+                await TranslateReleaseAsync(service, document, latestToTranslate, stage, false, statusPrefix, onRender, onStatus, onTranslated, token);
             }
             else
             {
@@ -406,12 +408,47 @@ public static class ChangelogFormatter
                || stage.VersionDisplayText.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static string FormatLanguageToggleText(bool showTranslation, ChangelogDocument? document)
+    public static string FormatLanguageToggleText(bool showTranslation, ChangelogDocument? document, ReleaseChannel channel = ReleaseChannel.None)
     {
-        var translatedCount = document?.Releases.Count(r => r.HasTranslation) ?? 0;
+        var visible = document is null ? [] : FilterReleasesByChannel(document.Releases, channel);
+        var translatedCount = visible.Count(r => r.HasTranslation);
         return showTranslation
             ? translatedCount > 0 ? $"Язык: Русский (ИИ · {translatedCount})" : "Язык: Русский (ИИ)"
             : "Язык: Оригинал";
+    }
+
+    public static ReleaseChannel GetDefaultChannel(UpdateStage? stage) =>
+        IsPrereleaseVersion(stage?.InstalledVersion) ? ReleaseChannel.Prerelease : ReleaseChannel.Stable;
+
+    public static bool HasMultipleChannels(IReadOnlyList<ChangelogRelease>? releases) =>
+        releases is { Count: > 1 }
+        && releases.Any(r => !r.IsPrerelease)
+        && releases.Any(r => r.IsPrerelease);
+
+    public static IReadOnlyList<ChangelogRelease> FilterReleasesByChannel(IReadOnlyList<ChangelogRelease> releases, ReleaseChannel channel)
+    {
+        if (channel == ReleaseChannel.None || !HasMultipleChannels(releases))
+        {
+            return releases;
+        }
+
+        return releases
+            .Where(r => channel == ReleaseChannel.Prerelease ? r.IsPrerelease : !r.IsPrerelease)
+            .ToList();
+    }
+
+    public static string FormatChannelToggleText(ReleaseChannel channel, ChangelogDocument? document)
+    {
+        if (document is null || !HasMultipleChannels(document.Releases))
+        {
+            return channel == ReleaseChannel.Prerelease ? "Канал: Альфа" : "Канал: Релизы";
+        }
+
+        var stableCount = document.Releases.Count(r => !r.IsPrerelease);
+        var preCount = document.Releases.Count - stableCount;
+        return channel == ReleaseChannel.Prerelease
+            ? $"Канал: Альфа ({preCount})"
+            : $"Канал: Релизы ({stableCount})";
     }
 
     public static string CategoryTitle(ChangeCategory category)
@@ -450,14 +487,14 @@ public static class ChangelogFormatter
 
     public static void AddDefaultCollapsedReleases(IReadOnlyList<ChangelogRelease> releases, ISet<string> collapsedReleaseKeys)
     {
-        for (var index = 0; index < releases.Count; index++)
+        if (HasMultipleChannels(releases))
         {
-            var release = releases[index];
-            if (index >= 2 && release.Groups.Sum(g => g.Items.Count) > 4)
-            {
-                collapsedReleaseKeys.Add(ReleaseKey(release));
-            }
+            AddCollapsedForChannel(releases.Where(r => !r.IsPrerelease).ToList(), collapsedReleaseKeys);
+            AddCollapsedForChannel(releases.Where(r => r.IsPrerelease).ToList(), collapsedReleaseKeys);
+            return;
         }
+
+        AddCollapsedForChannel(releases, collapsedReleaseKeys);
     }
 
     public static List<ReleaseBadge> BuildBadges(
@@ -467,17 +504,27 @@ public static class ChangelogFormatter
         bool showRuForCard,
         double badgeFontSize)
     {
-        var normalizedVersion = NormalizeVersion(release.Version);
         var isInstalled = stage?.InstalledVersion is { Length: > 0 } inst
-                          && string.Equals(normalizedVersion, NormalizeVersion(inst), StringComparison.OrdinalIgnoreCase);
+                          && VersionsMatch(release.Version, inst);
         var isAvailable = stage?.AvailableVersion is { Length: > 0 } avail
                           && stage.HasUpdate
-                          && string.Equals(normalizedVersion, NormalizeVersion(avail), StringComparison.OrdinalIgnoreCase);
+                          && !string.Equals(avail, stage.InstalledVersion, StringComparison.OrdinalIgnoreCase)
+                          && VersionsMatch(release.Version, avail);
+        var isPendingStoreUpdate = stage?.HasUpdate == true
+                                   && isInstalled
+                                   && (string.IsNullOrWhiteSpace(stage.AvailableVersion)
+                                       || string.Equals(stage.AvailableVersion, stage.InstalledVersion, StringComparison.OrdinalIgnoreCase))
+                                   && release.Title.Contains("Microsoft Store", StringComparison.OrdinalIgnoreCase);
 
         var badges = new List<ReleaseBadge>();
         if (isLatest)
         {
             badges.Add(new("Свежий", "Latest", badgeFontSize));
+        }
+
+        if (release.IsPrerelease)
+        {
+            badges.Add(new("Пререлиз", "Prerelease", badgeFontSize));
         }
 
         if (isInstalled)
@@ -487,6 +534,11 @@ public static class ChangelogFormatter
         else if (isAvailable)
         {
             badges.Add(new("Доступно", "Available", badgeFontSize));
+        }
+
+        if (isPendingStoreUpdate)
+        {
+            badges.Add(new("Есть обновление", "Available", badgeFontSize));
         }
 
         if (release.HasTranslation && showRuForCard)
@@ -641,8 +693,93 @@ public static class ChangelogFormatter
             return null;
         }
 
-        var match = Regex.Match(raw.Trim(), @"\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z._-]+)?");
-        return match.Success ? match.Value : raw.Trim().TrimStart('v', 'V');
+        var trimmed = raw.Trim();
+        if (Regex.IsMatch(trimmed, @"^\d{4}-\d{2}-\d{2}-"))
+        {
+            return trimmed;
+        }
+
+        var match = Regex.Match(trimmed, @"\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z._-]+)?");
+        return match.Success ? match.Value : trimmed.TrimStart('v', 'V');
+    }
+
+    public static bool IsPrereleaseVersion(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        return Regex.IsMatch(
+            raw.Trim(),
+            @"^(?:rust-)?v?\d+\.\d+(?:\.\d+)*-(?:alpha|beta|rc\d*|pre|preview|canary|dev|nightly|insiders|next)(?:[._-]|$)",
+            RegexOptions.IgnoreCase);
+    }
+
+    public static bool VersionsMatch(string? releaseVersion, string? stageVersion)
+    {
+        var normRelease = NormalizeVersion(releaseVersion);
+        var normStage = NormalizeVersion(stageVersion);
+        if (string.IsNullOrEmpty(normRelease) || string.IsNullOrEmpty(normStage))
+        {
+            return false;
+        }
+
+        if (string.Equals(normRelease, normStage, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return TryExtractCalVerPrefix(normRelease, out var calRelease, out _)
+               && TryExtractCalVerPrefix(normStage, out var calStage, out _)
+               && string.Equals(calRelease, calStage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool TryExtractCalVerPrefix(string? raw, out string shortCalVer, out string? isoDate)
+    {
+        shortCalVer = "";
+        isoDate = null;
+        var normalized = NormalizeVersion(raw);
+        if (string.IsNullOrEmpty(normalized))
+        {
+            return false;
+        }
+
+        var match = Regex.Match(normalized, @"^(?<yy>\d{2})\.(?<mmdd>\d{3,4})(?:\.\d+){0,2}$");
+        if (!match.Success || !int.TryParse(match.Groups["yy"].Value, out var yy))
+        {
+            return false;
+        }
+
+        var mmdd = match.Groups["mmdd"].Value;
+        var monthPart = mmdd.Length == 4 ? mmdd[..2] : mmdd[..1];
+        var dayPart = mmdd.Length == 4 ? mmdd[2..] : mmdd[1..];
+        if (!int.TryParse(monthPart, out var month) || !int.TryParse(dayPart, out var day))
+        {
+            return false;
+        }
+
+        var year = 2000 + yy;
+        if (year is < 2020 or > 2099 || month is < 1 or > 12 || day < 1 || day > DateTime.DaysInMonth(year, month))
+        {
+            return false;
+        }
+
+        shortCalVer = $"{yy}.{mmdd}";
+        isoDate = $"{year:D4}-{month:D2}-{day:D2}";
+        return true;
+    }
+
+    private static void AddCollapsedForChannel(IReadOnlyList<ChangelogRelease> channelReleases, ISet<string> collapsedReleaseKeys)
+    {
+        for (var index = 0; index < channelReleases.Count; index++)
+        {
+            var release = channelReleases[index];
+            if (index >= 2 && release.Groups.Sum(g => g.Items.Count) > 4)
+            {
+                collapsedReleaseKeys.Add(ReleaseKey(release));
+            }
+        }
     }
 
     private static string ShortenForSummary(string item)

@@ -60,7 +60,7 @@ public sealed class ChangelogContentFetcher : IChangelogContentFetcher
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
             return (content, response.Headers.ETag?.ToString(), false);
         }
-        catch (HttpRequestException) when ((source.Format is "github" or "github-releases") && source.PageUrl is not null)
+        catch (HttpRequestException) when ((source.Format is "github" or "github-releases" or "antigravity-cli") && source.PageUrl is not null)
         {
             var atomContent = await DownloadUrlAsync(source.PageUrl.TrimEnd('/') + ".atom", cancellationToken);
             return (atomContent, null, false);
@@ -76,10 +76,11 @@ public sealed class ChangelogContentFetcher : IChangelogContentFetcher
 
     public string? FindAgyExecutable()
     {
-        var candidates = new[] { Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "agy", "bin", "agy.exe") }
-            .Concat((Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
-                .Where(directory => !string.IsNullOrWhiteSpace(directory))
-                .Select(directory => Path.Combine(directory.Trim('"'), "agy.exe")));
+        var candidates = (Environment.GetEnvironmentVariable("PATH") ?? "")
+            .Split(Path.PathSeparator)
+            .Where(directory => !string.IsNullOrWhiteSpace(directory))
+            .Select(directory => Path.Combine(directory.Trim('"'), "agy.exe"))
+            .Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "agy", "bin", "agy.exe"));
 
         return candidates.FirstOrDefault(File.Exists);
     }

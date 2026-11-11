@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace AIUpdater.Services;
 
@@ -37,6 +38,7 @@ public sealed class ChangelogService(
         new DotNetReleasesChangelogParser(),
         new NpmRegistryChangelogParser(),
         new CodexAppChangelogParser(),
+        new AntigravityDesktopChangelogParser(),
         new HtmlChangelogParser(),
         new MarkdownChangelogParser(),
     ];
@@ -73,18 +75,25 @@ public sealed class ChangelogService(
     {
         cancellationToken.ThrowIfCancellationRequested();
         var cached = Repository.TryLoad(stage.Id);
+        var source = stage.GetChangelogSource();
         if (!forceRefresh && cached is not null && IsCacheUpToDateForStage(cached, stage))
         {
+            if (EnsureStageBuildCard(stage, source.Format, cached.Releases))
+            {
+                Repository.Save(cached);
+            }
+
             return (cached, true);
         }
 
-        var source = stage.GetChangelogSource();
         try
         {
             var etagToUse = forceRefresh ? null : cached?.ETag;
             var (releases, etag, notModified) = await FetchReleasesAsync(stage, source, etagToUse, cancellationToken);
             if (notModified && cached is not null)
             {
+                EnsureStageBuildCard(stage, source.Format, cached.Releases);
+                await EnrichCompareReleasesAsync(cached.Releases, cancellationToken);
                 cached.UpdatedAt = DateTimeOffset.UtcNow;
                 Repository.Save(cached);
                 return (cached, true);
@@ -94,6 +103,7 @@ public sealed class ChangelogService(
             {
                 if (cached is not null)
                 {
+                    EnsureStageBuildCard(stage, source.Format, cached.Releases);
                     return (cached, true);
                 }
 
@@ -102,6 +112,8 @@ public sealed class ChangelogService(
 
             ChangelogFormatter.EnsureSummaries(releases);
             var merged = cached is null ? releases : Repository.MergeReleases(releases, cached.Releases);
+            EnsureStageBuildCard(stage, source.Format, merged);
+            await EnrichCompareReleasesAsync(merged, cancellationToken);
             ChangelogFormatter.EnsureSummaries(merged);
             var document = new ChangelogDocument
             {
@@ -148,12 +160,13 @@ public sealed class ChangelogService(
             return false;
         }
 
-        var targetVersion = ChangelogFormatter.NormalizeVersion(stage.AvailableVersion ?? stage.InstalledVersion);
+        var targetVersion = stage.HasUpdate && !string.IsNullOrWhiteSpace(stage.AvailableVersion)
+            ? stage.AvailableVersion
+            : stage.InstalledVersion;
+
         if (!string.IsNullOrEmpty(targetVersion))
         {
-            var hasTarget = cached.Releases.Any(release =>
-                string.Equals(ChangelogFormatter.NormalizeVersion(release.Version), targetVersion, StringComparison.OrdinalIgnoreCase));
-
+            var hasTarget = cached.Releases.Any(release => ChangelogFormatter.VersionsMatch(release.Version, targetVersion));
             if (hasTarget && DateTimeOffset.UtcNow - cached.UpdatedAt < TimeSpan.FromHours(6))
             {
                 return true;
@@ -174,28 +187,10 @@ public sealed class ChangelogService(
             case "agy":
             {
                 var raw = await _fetcher.FetchAsync(source, cancellationToken);
-                var releases = ParseReleases(raw, "agy");
-                if (!string.IsNullOrWhiteSpace(stage.AvailableVersion)
-                    && releases.Count > 0
-                    && !string.Equals(ChangelogFormatter.NormalizeVersion(releases[0].Version), ChangelogFormatter.NormalizeVersion(stage.AvailableVersion), StringComparison.OrdinalIgnoreCase)
-                    && source.PageUrl is not null)
-                {
-                    try
-                    {
-                        var webRaw = await _fetcher.DownloadUrlAsync(source.PageUrl, cancellationToken);
-                        var webReleases = ParseReleases(webRaw, "html");
-                        if (webReleases.Count > 0)
-                        {
-                            releases = Repository.MergeReleases(webReleases, releases);
-                        }
-                    }
-                    catch (Exception exception) when (exception is HttpRequestException or InvalidDataException or TaskCanceledException)
-                    {
-                    }
-                }
-
-                return (releases, null, false);
+                return (ParseReleases(raw, "agy"), null, false);
             }
+            case "antigravity-cli":
+                return await LoadAntigravityCliReleasesAsync(source, cachedETag, cancellationToken);
             case "codex-plugins":
                 return (await LoadPluginReleasesAsync("codex", stage, cancellationToken), null, false);
             case "claude-plugins":
@@ -203,7 +198,7 @@ public sealed class ChangelogService(
             case "claude-desktop":
                 return (await LoadClaudeDesktopReleasesAsync(stage, source, cancellationToken), null, false);
             case "antigravity-desktop":
-                return (await LoadAntigravityDesktopReleasesAsync(source, cancellationToken), null, false);
+                return await LoadAntigravityDesktopReleasesAsync(source, cachedETag, cancellationToken);
         }
 
         var (content, etag, notModified) = await _fetcher.FetchWithETagAsync(source, cachedETag, cancellationToken);
@@ -213,6 +208,44 @@ public sealed class ChangelogService(
         }
 
         return (ParseReleases(content, source.Format), etag, false);
+    }
+
+    private async Task<(List<ChangelogRelease> Releases, string? ETag, bool NotModified)> LoadAntigravityCliReleasesAsync(
+        ChangelogSource source,
+        string? cachedETag,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (content, etag, notModified) = await _fetcher.FetchWithETagAsync(source, cachedETag, cancellationToken);
+            if (notModified)
+            {
+                return ([], etag, true);
+            }
+
+            var releases = ParseReleases(content, "github-releases");
+            foreach (var release in releases)
+            {
+                if (Regex.IsMatch(release.Title.Trim(), @"^v?\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z._-]+)?$", RegexOptions.IgnoreCase))
+                {
+                    var cleanVersion = ChangelogFormatter.NormalizeVersion(release.Version) ?? release.Version;
+                    release.Title = $"Antigravity CLI v{cleanVersion}";
+                }
+            }
+
+            if (releases.Count > 0)
+            {
+                return (releases, etag, false);
+            }
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested
+                                          && exception is HttpRequestException or InvalidDataException or JsonException or TaskCanceledException)
+        {
+        }
+
+        var localSource = new ChangelogSource(source.PageUrl, "local://agy-changelog", "agy", source.Note);
+        var localRaw = await _fetcher.FetchAsync(localSource, cancellationToken);
+        return (ParseReleases(localRaw, "agy"), null, false);
     }
 
     private async Task<List<ChangelogRelease>> LoadClaudeDesktopReleasesAsync(
@@ -289,46 +322,220 @@ public sealed class ChangelogService(
         return releases;
     }
 
-    private async Task<List<ChangelogRelease>> LoadAntigravityDesktopReleasesAsync(
+    private async Task<(List<ChangelogRelease> Releases, string? ETag, bool NotModified)> LoadAntigravityDesktopReleasesAsync(
         ChangelogSource source,
+        string? cachedETag,
         CancellationToken cancellationToken)
     {
-        if (source.DownloadUrl is not null)
+        var (content, etag, notModified) = await _fetcher.FetchWithETagAsync(source, cachedETag, cancellationToken);
+        if (notModified)
         {
+            return ([], etag, true);
+        }
+
+        return (ParseReleases(content, "antigravity-desktop"), etag, false);
+    }
+
+    private static bool EnsureStageBuildCard(UpdateStage stage, string format, List<ChangelogRelease> releases)
+    {
+        if (!string.Equals(format, "codex-app", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var storeVersion = stage.HasUpdate
+                           && !string.IsNullOrWhiteSpace(stage.AvailableVersion)
+                           && !string.Equals(stage.AvailableVersion, stage.InstalledVersion, StringComparison.OrdinalIgnoreCase)
+            ? stage.AvailableVersion
+            : stage.InstalledVersion;
+
+        var removed = releases.RemoveAll(release =>
+            release.Title.Contains("Microsoft Store", StringComparison.OrdinalIgnoreCase)
+            && (string.IsNullOrWhiteSpace(storeVersion)
+                || !string.Equals(ChangelogFormatter.NormalizeVersion(release.Version), ChangelogFormatter.NormalizeVersion(storeVersion), StringComparison.OrdinalIgnoreCase)
+                || releases.Any(other => !ReferenceEquals(other, release) && ChangelogFormatter.VersionsMatch(other.Version, release.Version))));
+
+        if (string.IsNullOrWhiteSpace(storeVersion))
+        {
+            return removed > 0;
+        }
+
+        if (releases.Any(release => !release.Title.Contains("Microsoft Store", StringComparison.OrdinalIgnoreCase)
+                                    && ChangelogFormatter.VersionsMatch(release.Version, storeVersion)))
+        {
+            return removed > 0;
+        }
+
+        var existingStoreCard = releases.FirstOrDefault(release => release.Title.Contains("Microsoft Store", StringComparison.OrdinalIgnoreCase));
+        ChangelogFormatter.TryExtractCalVerPrefix(storeVersion, out var shortCalVer, out var buildIsoDate);
+        var publishedAt = buildIsoDate ?? stage.CheckedAt?.ToLocalTime().ToString("yyyy-MM-dd");
+
+        var items = new List<string>();
+        if (!string.IsNullOrWhiteSpace(stage.InstalledVersion))
+        {
+            var dateSuffix = buildIsoDate is not null && string.Equals(storeVersion, stage.InstalledVersion, StringComparison.OrdinalIgnoreCase)
+                ? $" (сборка от {buildIsoDate})"
+                : "";
+            items.Add($"Установлен пакет Microsoft Store `OpenAI.Codex`: `v{stage.InstalledVersion}`{dateSuffix}.");
+        }
+
+        if (stage.HasUpdate)
+        {
+            if (!string.IsNullOrWhiteSpace(stage.AvailableVersion)
+                && !string.Equals(stage.AvailableVersion, stage.InstalledVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                items.Add($"В Microsoft Store доступно обновление: сборка `v{stage.AvailableVersion}`.");
+            }
+            else
+            {
+                items.Add("В Microsoft Store доступно более новое обновление пакета (магазин Windows не раскрывает номер новой сборки и список изменений до установки).");
+            }
+        }
+
+        items.Add("Подробные заметки к этой сборке настольного приложения ещё не опубликованы в веб-журнале OpenAI; ниже приведены последние опубликованные записи Codex и приложения.");
+
+        var title = !string.IsNullOrEmpty(shortCalVer)
+            ? $"ChatGPT / Codex App {shortCalVer} (Microsoft Store v{storeVersion})"
+            : $"ChatGPT / Codex App v{storeVersion} (Microsoft Store)";
+
+        var existingIndex = existingStoreCard is null ? -1 : releases.IndexOf(existingStoreCard);
+        if (existingStoreCard is not null)
+        {
+            releases.RemoveAt(existingIndex);
+        }
+
+        var insertIndex = 0;
+        if (!string.IsNullOrEmpty(publishedAt))
+        {
+            while (insertIndex < releases.Count
+                   && !string.IsNullOrEmpty(releases[insertIndex].PublishedAt)
+                   && string.CompareOrdinal(releases[insertIndex].PublishedAt, publishedAt) > 0)
+            {
+                insertIndex++;
+            }
+        }
+
+        if (existingStoreCard is not null)
+        {
+            var sameItems = existingStoreCard.Groups.Count == 1 && existingStoreCard.Groups[0].Items.SequenceEqual(items, StringComparer.Ordinal);
+            existingStoreCard.Title = title;
+            existingStoreCard.PublishedAt = publishedAt;
+            if (!sameItems)
+            {
+                existingStoreCard.Groups =
+                [
+                    new()
+                    {
+                        Category = ChangeCategory.Changed,
+                        Title = ChangelogFormatter.CategoryTitle(ChangeCategory.Changed),
+                        Items = items,
+                    },
+                ];
+            }
+
+            releases.Insert(insertIndex, existingStoreCard);
+            return removed > 0 || !sameItems || existingIndex != insertIndex;
+        }
+
+        var card = new ChangelogRelease
+        {
+            Version = storeVersion!,
+            Title = title,
+            PublishedAt = publishedAt,
+            Groups =
+            [
+                new()
+                {
+                    Category = ChangeCategory.Changed,
+                    Title = ChangelogFormatter.CategoryTitle(ChangeCategory.Changed),
+                    Items = items,
+                },
+            ],
+        };
+
+        releases.Insert(insertIndex, card);
+        return true;
+    }
+
+    private async Task EnrichCompareReleasesAsync(List<ChangelogRelease> releases, CancellationToken cancellationToken)
+    {
+        var targets = releases.Where(r => !r.IsPrerelease && !string.IsNullOrWhiteSpace(r.CompareUrl) && ChangelogParseHelper.IsPlaceholderOnlyGroups(r.Groups)).Take(3)
+            .Concat(releases.Where(r => r.IsPrerelease && !string.IsNullOrWhiteSpace(r.CompareUrl) && ChangelogParseHelper.IsPlaceholderOnlyGroups(r.Groups)).Take(8))
+            .ToList();
+
+        foreach (var release in targets)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var html = await _fetcher.DownloadUrlAsync(source.DownloadUrl, cancellationToken);
-                var parsed = ParseReleases(html, "html");
-                if (parsed.Count > 0)
+                var compareJson = await _fetcher.DownloadUrlAsync(release.CompareUrl!, cancellationToken);
+                var commitGroups = ParseCompareCommitsIntoGroups(compareJson);
+                if (commitGroups.Count > 0)
                 {
-                    return parsed;
+                    release.Groups = commitGroups;
                 }
+                else
+                {
+                    release.Groups =
+                    [
+                        new()
+                        {
+                            Category = ChangeCategory.Changed,
+                            Title = ChangelogFormatter.CategoryTitle(ChangeCategory.Changed),
+                            Items = [$"Сборка {release.Version} без отдельных изменений кода относительно предыдущего тега."],
+                        },
+                    ];
+                }
+
+                release.CompareUrl = null;
             }
-            catch (Exception exception) when (exception is HttpRequestException or InvalidDataException or TaskCanceledException)
+            catch (Exception exception) when (exception is HttpRequestException or InvalidDataException or JsonException or TaskCanceledException)
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+
+                break;
             }
         }
+    }
 
-        try
+    private static List<ChangelogGroup> ParseCompareCommitsIntoGroups(string compareJson)
+    {
+        using var doc = JsonDocument.Parse(compareJson);
+        if (!doc.RootElement.TryGetProperty("commits", out var commitsArr) || commitsArr.ValueKind != JsonValueKind.Array)
         {
-            var agySource = UpdateStage.GetChangelogSource("Antigravity CLI");
-            var agyText = await _fetcher.FetchAsync(agySource, cancellationToken);
-            var agyReleases = ParseReleases(agyText, "agy");
-            foreach (var item in agyReleases)
-            {
-                item.Title = $"Google Antigravity v{item.Version}";
-            }
-
-            if (agyReleases.Count > 0)
-            {
-                return agyReleases;
-            }
+            return [];
         }
-        catch (InvalidDataException)
+
+        var subjects = new List<string>();
+        foreach (var item in commitsArr.EnumerateArray().Reverse())
         {
+            if (!item.TryGetProperty("commit", out var commitObj)
+                || !commitObj.TryGetProperty("message", out var msgProp)
+                || msgProp.GetString() is not { Length: > 0 } fullMessage)
+            {
+                continue;
+            }
+
+            var firstLine = fullMessage.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
+            if (string.IsNullOrWhiteSpace(firstLine)
+                || firstLine.StartsWith("Merge ", StringComparison.OrdinalIgnoreCase)
+                || Regex.IsMatch(firstLine, @"^(?:chore(?:\(release\))?:?\s*)?(?:release|bump\s+version)\b", RegexOptions.IgnoreCase)
+                || Regex.IsMatch(firstLine, @"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z._-]+)?$"))
+            {
+                continue;
+            }
+
+            subjects.Add($"- {firstLine}");
+            if (subjects.Count >= 25)
+            {
+                break;
+            }
         }
 
-        return [];
+        return subjects.Count == 0 ? [] : ChangelogParseHelper.ParseBodyIntoGroups(string.Join('\n', subjects));
     }
 
     private async Task<List<ChangelogRelease>> LoadPluginReleasesAsync(

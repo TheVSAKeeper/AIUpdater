@@ -328,3 +328,23 @@ foreach ($stage in @('Claude Desktop', 'Antigravity Desktop', 'Codex plugins'))
     }
 }
 Write-Output 'PASS: unhandled check failures emit ERROR and preserve failure accounting'
+
+function Get-CodexVersion
+{
+    return [version]'26.1103.7773.0'
+}
+function Get-CodexPackagedStoreUpdateState
+{
+    return [pscustomobject]@{
+        Success = $true
+        Updates = @([pscustomobject]@{ Name = 'OpenAI.Codex'; Version = '26.1103.7773.0' })
+    }
+}
+$script:messages.Clear()
+Test-CodexDesktopUpdate 'Codex desktop'
+$storeResult = Read-Result
+if ($storeResult.Result -ne 'AVAILABLE' -or $storeResult.Installed -ne '26.1103.7773.0' -or $null -ne $storeResult.Available -or -not $storeResult.Info)
+{
+    throw 'Store update echoing installed Package.Id.Version leaked identical Available version'
+}
+Write-Output 'PASS: Store update echoing installed package version omits duplicate target version'

@@ -4,6 +4,13 @@ public sealed record ChangelogSource(string? PageUrl, string? DownloadUrl, strin
 
 public sealed record ReleaseBadge(string Text, string Kind, double FontSize);
 
+public enum ReleaseChannel
+{
+    None = 0,
+    Stable = 1,
+    Prerelease = 2,
+}
+
 public enum ChangeCategory
 {
     None = 0,
@@ -27,6 +34,8 @@ public sealed class ChangelogRelease
     public string Version { get; set; } = "";
     public string Title { get; set; } = "";
     public string? PublishedAt { get; set; }
+    public bool IsPrerelease { get; set; }
+    public string? CompareUrl { get; set; }
     public string? Summary { get; set; }
     public List<ChangelogGroup> Groups { get; set; } = [];
     public string? TranslatedTitle { get; set; }
@@ -37,7 +46,7 @@ public sealed class ChangelogRelease
 
 public sealed class ChangelogDocument
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 7;
 
     public int SchemaVersion { get; set; }
     public string StageId { get; set; } = "";

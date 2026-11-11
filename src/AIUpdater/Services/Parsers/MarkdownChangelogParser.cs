@@ -60,6 +60,7 @@ public sealed class MarkdownChangelogParser : IChangelogFormatParser
                 Version = version,
                 Title = title,
                 PublishedAt = publishedAt,
+                IsPrerelease = ChangelogFormatter.IsPrereleaseVersion(version),
                 Groups = groups,
             });
         }

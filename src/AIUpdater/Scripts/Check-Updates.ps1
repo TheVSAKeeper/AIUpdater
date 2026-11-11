@@ -82,7 +82,18 @@ function Test-CodexDesktopUpdate
         $updates = @($state.Updates | Where-Object Name -EQ $definition.AppxName)
         if ($updates.Count -gt 0)
         {
-            Write-CheckResult $Stage 'AVAILABLE' "Microsoft Store reports an update. Installed: $installed; available: $( $updates[0].Version )" $installed $updates[0].Version
+            $reportedVersion = "$( $updates[0].Version )"
+            $available = if (-not [string]::IsNullOrWhiteSpace($reportedVersion) -and $reportedVersion -ne "$installed") { $reportedVersion } else { $null }
+            $detail = if ($null -ne $available)
+            {
+                "Microsoft Store reports an update. Installed: $installed; available: $available"
+            }
+            else
+            {
+                "Microsoft Store reports an update for installed version $installed"
+            }
+            $info = if ($null -eq $available) { 'Microsoft Store не передаёт номер новой версии до установки' } else { $null }
+            Write-CheckResult $Stage 'AVAILABLE' $detail $installed $available -Info $info
         }
         else
         {

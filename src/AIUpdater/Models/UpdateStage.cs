@@ -8,7 +8,7 @@ public sealed class UpdateStage : ObservableObject
 {
     private static readonly ChangelogSource CodexCliSource = new(
         "https://github.com/openai/codex/releases",
-        "https://api.github.com/repos/openai/codex/releases?per_page=10",
+        "https://api.github.com/repos/openai/codex/releases?per_page=60",
         "github-releases",
         "Официальные выпуски Codex CLI и npm-пакета @openai/codex.");
 
@@ -48,12 +48,12 @@ public sealed class UpdateStage : ObservableObject
             "https://antigravity.google/docs/changelog",
             "https://antigravity.google/docs/changelog",
             "antigravity-desktop",
-            "Официальная история изменений Google Antigravity.")),
+            "Официальная история изменений настольного приложения Google Antigravity.")),
         new("Antigravity CLI", "Google", "Antigravity CLI (agy)", true, static _ => new(
-            "https://antigravity.google/docs/changelog",
-            "local://agy-changelog",
-            "agy",
-            "Встроенная история agy changelog и опубликованные изменения Google Antigravity.")),
+            "https://github.com/google-antigravity/antigravity-cli/releases",
+            "https://api.github.com/repos/google-antigravity/antigravity-cli/releases?per_page=15",
+            "antigravity-cli",
+            "Официальные выпуски Antigravity CLI (agy) на GitHub с локальным резервом agy changelog.")),
         new("DSH", "DeepSeek", "DeepSeek Harness (DSH)", true, static _ => new(
             "https://www.npmjs.com/package/@deepseek-ai/dsh",
             "https://registry.npmjs.org/@deepseek-ai/dsh",
@@ -132,15 +132,15 @@ public sealed class UpdateStage : ObservableObject
 
     public string VersionDisplayText => InstalledVersion is null
         ? AvailableVersion is null ? PackageStatus == PackageStatus.DirectUpdate ? Info ?? "" : "" : $"Доступна v{AvailableVersion}"
-        : HasUpdate && AvailableVersion is not null
+        : HasUpdate && AvailableVersion is not null && !string.Equals(AvailableVersion, InstalledVersion, StringComparison.OrdinalIgnoreCase)
             ? $"v{InstalledVersion} → v{AvailableVersion}"
             : $"v{InstalledVersion}";
 
-    public string VersionPrefixText => HasUpdate && InstalledVersion is not null && AvailableVersion is not null
+    public string VersionPrefixText => HasUpdate && InstalledVersion is not null && AvailableVersion is not null && !string.Equals(AvailableVersion, InstalledVersion, StringComparison.OrdinalIgnoreCase)
         ? $"v{InstalledVersion} → "
         : VersionDisplayText;
 
-    public string VersionTargetText => HasUpdate && InstalledVersion is not null && AvailableVersion is not null
+    public string VersionTargetText => HasUpdate && InstalledVersion is not null && AvailableVersion is not null && !string.Equals(AvailableVersion, InstalledVersion, StringComparison.OrdinalIgnoreCase)
         ? $"v{AvailableVersion}"
         : "";
 

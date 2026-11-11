@@ -9,8 +9,7 @@ public sealed class HtmlChangelogParser : IChangelogFormatParser
     public bool CanParse(string format) =>
         string.Equals(format, "html", StringComparison.OrdinalIgnoreCase)
         || string.Equals(format, "vscode", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(format, "claude-desktop", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(format, "antigravity-desktop", StringComparison.OrdinalIgnoreCase);
+        || string.Equals(format, "claude-desktop", StringComparison.OrdinalIgnoreCase);
 
     public IReadOnlyList<ChangelogRelease> Parse(string raw) =>
         ParseHtml(raw);
