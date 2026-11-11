@@ -1,6 +1,7 @@
-﻿<UserControl x:Class="AIUpdater.Views.UpdatesView" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:views="clr-namespace:AIUpdater.Views" FontSize="{DynamicResource Font.Size.Body}">
+﻿<UserControl x:Class="AIUpdater.Views.UpdatesView" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:views="clr-namespace:AIUpdater.Views" xmlns:infra="clr-namespace:AIUpdater.Infrastructure" FontSize="{DynamicResource Font.Size.Body}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolVisibility" />
+        <infra:ToolColumnsConverter x:Key="ToolColumns" />
     </UserControl.Resources>
     <Grid>
         <Grid.RowDefinitions>
@@ -32,7 +33,14 @@
                                 <ItemsControl Grid.Column="1" ItemsSource="{Binding Cards}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
-                                            <UniformGrid Columns="4" />
+                                            <UniformGrid>
+                                                <UniformGrid.Columns>
+                                                    <MultiBinding Converter="{StaticResource ToolColumns}">
+                                                        <Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=views:UpdatesView}" />
+                                                        <Binding Path="FontSize" RelativeSource="{RelativeSource AncestorType=views:UpdatesView}" />
+                                                    </MultiBinding>
+                                                </UniformGrid.Columns>
+                                            </UniformGrid>
                                         </ItemsPanelTemplate>
                                     </ItemsControl.ItemsPanel>
                                 </ItemsControl>

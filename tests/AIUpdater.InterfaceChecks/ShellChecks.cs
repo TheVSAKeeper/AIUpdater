@@ -76,6 +76,7 @@ internal static partial class Program
             host.Settle();
             var cards = Descendants<StageCardView>(updates).ToArray();
             Check(cards.Length == 17, "The update page did not materialize every tool card");
+            Check(Descendants<UniformGrid>(updates).All(panel => panel.Columns == (width == 1200 ? 4 : 3)), "Card columns did not adapt to the shell content width");
             var widths = cards.Select(card => card.ActualWidth).ToArray();
             Check(widths.Max() - widths.Min() < 1, "Vendor card widths differ");
             foreach (var row in cards.GroupBy(card => Math.Round(card.TranslatePoint(new(), updates).Y)))
@@ -139,7 +140,7 @@ internal static partial class Program
         shell.Preferences.ShowPageHeader = true;
         shell.Preferences.FontScale = 1.6;
         host.Settle();
-        Check(FontScaleManager.Current == 1.6, "Font scaling was not applied");
+        Check(FontScaleManager.Current == 1.6 && Descendants<UniformGrid>(updates).All(panel => panel.Columns == 1), "Font scaling did not adjust the card layout");
         shell.Preferences.FontScale = 1;
         host.Settle();
 
