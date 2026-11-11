@@ -1,0 +1,49 @@
+﻿name: Ошибка
+description: Приложение работает не так, как ожидается
+title: "[Ошибка]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Если проблема связана с безопасностью, используйте [приватный отчёт](https://github.com/TheVSAKeeper/AIUpdater/security/advisories/new).
+        Перед отправкой уберите токены и персональные данные из журналов и снимков.
+  - type: input
+    id: version
+    attributes:
+      label: Версия AIUpdater
+      description: Номер из заголовка приложения или страницы релиза, обычный или portable архив
+    validations:
+      required: true
+  - type: input
+    id: component
+    attributes:
+      label: Компонент или раздел
+      placeholder: Например, Codex CLI, Node.js или «Что нового»
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Как воспроизвести
+      description: Последовательность действий от запуска приложения до ошибки
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Ожидаемое и фактическое поведение
+      description: Что должно было произойти и что произошло? Можно приложить снимок.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Журнал
+      description: Подходящий фрагмент из раздела «Журнал» или файла в %LOCALAPPDATA%\AIUpdater\Logs, без секретов и личных путей
+      render: text
+  - type: textarea
+    id: environment
+    attributes:
+      label: Окружение
+      description: Версия Windows и версии затронутых winget, npm, PowerShell или CLI, если они относятся к проблеме

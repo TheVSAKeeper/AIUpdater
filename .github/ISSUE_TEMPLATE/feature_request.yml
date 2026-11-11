@@ -1,0 +1,24 @@
+﻿name: Предложение
+description: Новый компонент, улучшение интерфейса или сценария работы
+title: "[Предложение]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу нужно решить
+      description: Опишите конкретный сценарий и что сейчас мешает
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Ожидаемое поведение
+      description: Как это должно работать для пользователя
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Дополнительные сведения
+      description: Примеры, ссылки на инструменты или варианты решения
