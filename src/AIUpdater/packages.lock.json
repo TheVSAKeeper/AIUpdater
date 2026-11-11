@@ -27,9 +27,9 @@
       },
       "KeepShell.Agents": {
         "type": "Direct",
-        "requested": "[0.1.260, )",
-        "resolved": "0.1.260",
-        "contentHash": "4TfhvtdV9IK5Eyors150zFLcjDTlyoRWbRgKHRgUegtSFLxC1aHyUqKTkwU3nlCLp9/0tjaYdzAoMtzgAgfgbw==",
+        "requested": "[0.1.262, )",
+        "resolved": "0.1.262",
+        "contentHash": "HeNKP4J1scUSehG+H44UQXs8LoOL44zUl0PxBfIb69+MJN7N7zi5ehkwAA4aiDn4HNc4r3iO7oOs8U/MMd9nfA==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "8.0.2"
         }

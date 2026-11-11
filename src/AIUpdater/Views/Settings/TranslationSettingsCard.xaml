@@ -32,7 +32,7 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBox x:Name="TranslationModelTextBox" Text="{Binding Model, UpdateSourceTrigger=PropertyChanged}" />
-                <Button x:Name="ModelChoicesButton" Grid.Column="1" Content="Выбрать…" Margin="8,0,0,0" IsEnabled="{Binding HasModels}" Click="ModelChoices_Click" ContextMenu="{StaticResource ModelChoicesMenu}" />
+                <Button x:Name="ModelChoicesButton" Grid.Column="1" Content="Выбрать…" Margin="8,0,0,0" Click="ModelChoices_Click" ContextMenu="{StaticResource ModelChoicesMenu}" />
             </Grid>
             <TextBlock Text="Выберите из списка или введите ID. Пусто – модель по умолчанию в CLI." Foreground="{DynamicResource Fg.Muted}" FontSize="{DynamicResource Font.Size.S}" Margin="0,7,0,0" TextWrapping="Wrap" />
             <CheckBox x:Name="AutomaticTranslationCheckBox" Content="Переводить новые выпуски автоматически" IsChecked="{Binding Automatic}" Margin="0,22,0,22" />

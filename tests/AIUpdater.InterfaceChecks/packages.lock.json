@@ -34,8 +34,8 @@
       },
       "KeepShell.Agents": {
         "type": "Transitive",
-        "resolved": "0.1.260",
-        "contentHash": "4TfhvtdV9IK5Eyors150zFLcjDTlyoRWbRgKHRgUegtSFLxC1aHyUqKTkwU3nlCLp9/0tjaYdzAoMtzgAgfgbw==",
+        "resolved": "0.1.262",
+        "contentHash": "HeNKP4J1scUSehG+H44UQXs8LoOL44zUl0PxBfIb69+MJN7N7zi5ehkwAA4aiDn4HNc4r3iO7oOs8U/MMd9nfA==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "8.0.2"
         }
@@ -146,7 +146,7 @@
         "dependencies": {
           "CommunityToolkit.Mvvm": "[8.4.2, )",
           "KeepShell": "[0.1.260, )",
-          "KeepShell.Agents": "[0.1.260, )",
+          "KeepShell.Agents": "[0.1.262, )",
           "KeepShell.Automation": "[0.1.260, )",
           "Microsoft.Extensions.DependencyInjection": "[10.0.9, )"
         }

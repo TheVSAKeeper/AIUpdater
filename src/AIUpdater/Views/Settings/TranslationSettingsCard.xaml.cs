@@ -13,8 +13,13 @@ public partial class TranslationSettingsCard : UserControl
         DataContextChanged += (_, _) => ModelChoicesButton.ContextMenu.DataContext = DataContext;
     }
 
-    private void ModelChoices_Click(object sender, RoutedEventArgs e)
+    private async void ModelChoices_Click(object sender, RoutedEventArgs e)
     {
+        if (DataContext is not TranslationAgentViewModel model || model.DetectCommand.IsRunning) return;
+        var backend = model.BackendId;
+        var path = model.ExecutablePath;
+        await model.DetectCommand.ExecuteAsync(null);
+        if (DataContext != model || model.BackendId != backend || model.ExecutablePath != path || !model.HasModels) return;
         ModelChoicesButton.ContextMenu.PlacementTarget = ModelChoicesButton;
         ModelChoicesButton.ContextMenu.IsOpen = true;
     }
