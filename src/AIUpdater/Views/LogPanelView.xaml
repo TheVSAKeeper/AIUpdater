@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:models="clr-namespace:AIUpdater.Models">
     <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolVisibility" />
         <DataTemplate x:Key="VendorTabHeaderTemplate"
                       DataType="{x:Type models:VendorStatus}">
             <StackPanel Orientation="Horizontal">
@@ -22,7 +23,8 @@
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"
                            Text="{Binding Detail}"
-                           ToolTip="{Binding Detail}" />
+                           ToolTip="{Binding Detail}"
+                           Visibility="{Binding HasActiveDetail, Converter={StaticResource BoolVisibility}}" />
                 <TextBox Padding="10,6,10,6"
                          Background="#0C1712"
                          BorderThickness="0"

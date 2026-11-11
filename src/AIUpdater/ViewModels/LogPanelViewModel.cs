@@ -70,7 +70,7 @@ public sealed class LogPanelViewModel : ObservableObject
     {
         if (_executionService.ReadPreviousLog(
                 _executionService.LogPath,
-                "История прошлого запуска. Карточки показывают отдельно сохранённые результаты.\n") is { } previousLog)
+                "История прошлого запуска\n") is { } previousLog)
         {
             GeneralLogText = previousLog;
         }

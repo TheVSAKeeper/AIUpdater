@@ -82,7 +82,7 @@ public sealed class MainViewModel : ObservableObject
     public IAsyncRelayCommand UpdateSelectedCommand { get; }
     public IRelayCommand StopCommand { get; }
     public IRelayCommand<object> OpenChangelogCommand { get; }
-    public string OverallStatusText { get; set => SetProperty(ref field, value); } = "Готов к проверке обновлений";
+    public string OverallStatusText { get; set => SetProperty(ref field, value); } = "Готов к работе";
     public string UpdateButtonText { get; private set => SetProperty(ref field, value); } = "Обновить выбранные (0)";
 
     public bool CanUpdateSelected
@@ -202,7 +202,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (_executionService.LoadResults(Stages, Vendors, error => AppendLine(error)))
         {
-            OverallStatusText = "Показаны последние результаты. Нажмите «Проверить всё», чтобы обновить их.";
+            OverallStatusText = "Показаны сохранённые результаты проверки";
         }
     }
 
