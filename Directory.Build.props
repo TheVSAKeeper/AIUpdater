@@ -1,6 +1,6 @@
 ﻿<Project>
   <PropertyGroup>
-    <Version>2</Version>
+    <Version>3</Version>
     <InformationalVersion>$(Version)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
