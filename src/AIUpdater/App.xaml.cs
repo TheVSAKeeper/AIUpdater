@@ -26,12 +26,17 @@ public partial class App
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
     }
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         try
         {
+            if (e.Args.FirstOrDefault() == "--gallery")
+            {
+                Shutdown(await Automation.GalleryHost.RunAsync(e.Args.Skip(1)));
+                return;
+            }
             var paths = AppPaths.Default;
             _logging = KeepShellLogging.Bootstrap(new KeepShellLoggingOptions
             {
@@ -53,6 +58,12 @@ public partial class App
         catch (Exception exception)
         {
             Log.Error(exception, "Не удалось запустить AI Updater");
+            if (e.Args.FirstOrDefault() == "--gallery")
+            {
+                Console.Error.WriteLine(exception);
+                Shutdown(1);
+                return;
+            }
             KeepShell.Services.StyledMessageBox.Show(exception.Message, "Не удалось запустить AI Updater", MessageBoxButton.OK, MessageBoxImage.Error, MessageBoxResult.OK);
             Shutdown(1);
         }

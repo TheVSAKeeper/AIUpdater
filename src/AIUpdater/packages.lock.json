@@ -34,6 +34,15 @@
           "Microsoft.Extensions.Logging.Abstractions": "8.0.2"
         }
       },
+      "KeepShell.Automation": {
+        "type": "Direct",
+        "requested": "[0.1.260, )",
+        "resolved": "0.1.260",
+        "contentHash": "eNasCu0E4o4nIgIj1YpfutUnrOx0VNjFMulMY3WTyUA24XVxGY8s0fHoSpZ9FuK8SdYecKBPTE4DTd3mUTsEZQ==",
+        "dependencies": {
+          "KeepShell": "0.1.260"
+        }
+      },
       "Microsoft.Extensions.DependencyInjection": {
         "type": "Direct",
         "requested": "[10.0.9, )",
