@@ -117,6 +117,8 @@ winget upgrade --id 9N0DX20HK701 -e --source msstore
 
 ## Структура проекта и проверки
 
+Общие контролы оформляет `KeepShell`; тёмно-зелёная палитра приложения находится в `src/AIUpdater/Resources/Themes/DarkGreen.xaml`, регистрация темы – в `src/AIUpdater/Infrastructure/AppTheme.cs`. Компоновка карточек, журналы и логика обновления принадлежат AIUpdater. Пакеты `KeepShell` и `KeepShell.Agents` поставляются в локальном источнике `packages/`; остальные модули каркаса не требуются.
+
 ```text
 src/AIUpdater/                   приложение WPF (.NET 10)
     Models/                      описание этапов, карточек, вкладок и источников релизов

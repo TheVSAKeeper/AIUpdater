@@ -1,0 +1,45 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="Bg.Base" Color="#0B1411" />
+    <SolidColorBrush x:Key="Bg.Surface" Color="#121F1A" />
+    <SolidColorBrush x:Key="Bg.SurfaceAlt" Color="#192C22" />
+    <SolidColorBrush x:Key="Bg.SurfaceMute" Color="#213C2D" />
+    <SolidColorBrush x:Key="Bg.ScrollTrack" Color="#15271D" />
+    <SolidColorBrush x:Key="Bg.ScrollThumb" Color="#5B8C73" />
+    <SolidColorBrush x:Key="Bg.ScrollThumbHover" Color="#81B89B" />
+    <SolidColorBrush x:Key="Border.Subtle" Color="#283E33" />
+    <SolidColorBrush x:Key="Border.Default" Color="#365844" />
+    <SolidColorBrush x:Key="Border.Strong" Color="#669F7E" />
+    <SolidColorBrush x:Key="Fg.Primary" Color="#EDF7F1" />
+    <SolidColorBrush x:Key="Fg.Secondary" Color="#CCE4D6" />
+    <SolidColorBrush x:Key="Fg.Muted" Color="#A6C2B2" />
+    <SolidColorBrush x:Key="Fg.OnAccent" Color="#052417" />
+    <SolidColorBrush x:Key="Fg.OnError" Color="#1F080D" />
+    <SolidColorBrush x:Key="Accent.Primary" Color="#00B968" />
+    <SolidColorBrush x:Key="Accent.PrimaryHover" Color="#20CE85" />
+    <SolidColorBrush x:Key="Accent.PrimaryPress" Color="#07995C" />
+    <SolidColorBrush x:Key="Accent.Soft" Color="#153F2B" />
+    <SolidColorBrush x:Key="Accent.Text" Color="#6EE7B7" />
+    <SolidColorBrush x:Key="Accent.TextHover" Color="#A7F3D0" />
+    <SolidColorBrush x:Key="State.Success" Color="#34D399" />
+    <SolidColorBrush x:Key="State.SuccessSoft" Color="#163E2B" />
+    <SolidColorBrush x:Key="State.SuccessText" Color="#6EE7B7" />
+    <SolidColorBrush x:Key="State.Warning" Color="#E0B055" />
+    <SolidColorBrush x:Key="State.WarningSoft" Color="#41351B" />
+    <SolidColorBrush x:Key="State.WarningText" Color="#F1C46D" />
+    <SolidColorBrush x:Key="State.Error" Color="#F06A78" />
+    <SolidColorBrush x:Key="State.ErrorHover" Color="#F47E8A" />
+    <SolidColorBrush x:Key="State.ErrorPress" Color="#D85A68" />
+    <SolidColorBrush x:Key="State.ErrorSoft" Color="#45242C" />
+    <SolidColorBrush x:Key="State.ErrorText" Color="#FDA4AF" />
+    <SolidColorBrush x:Key="State.ErrorStrong" Color="#F06A78" />
+    <SolidColorBrush x:Key="State.Info" Color="#93A6BA" />
+    <SolidColorBrush x:Key="State.InfoSoft" Color="#1D3038" />
+    <SolidColorBrush x:Key="State.InfoText" Color="#A8CCED" />
+    <SolidColorBrush x:Key="Fg.Disabled" Color="#789385" />
+    <SolidColorBrush x:Key="Fg.Link" Color="#6EE7B7" />
+    <SolidColorBrush x:Key="Bg.Selection" Color="#245C40" />
+    <SolidColorBrush x:Key="Bg.Overlay" Color="#A60B1411" />
+    <SolidColorBrush x:Key="Accent.Focus" Color="#A7F3D0" />
+    <x:Null x:Key="Card.Shadow" />
+</ResourceDictionary>

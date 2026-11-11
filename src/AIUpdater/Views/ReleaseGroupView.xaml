@@ -20,7 +20,7 @@
             </Grid.ColumnDefinitions>
             <TextBlock Text="{Binding ChevronText}"
                        FontSize="{Binding MetaFontSize}"
-                       Foreground="{StaticResource MutedBrush}"
+                       Foreground="{DynamicResource Fg.Muted}"
                        VerticalAlignment="Center"
                        Margin="0,0,6,0" />
             <TextBlock Grid.Column="1"
@@ -57,7 +57,7 @@
                        Text="{Binding SummaryPreviewText}"
                        ToolTip="{Binding SummaryPreviewTooltip}"
                        FontSize="{Binding MetaFontSize}"
-                       Foreground="{StaticResource MutedBrush}"
+                       Foreground="{DynamicResource Fg.Muted}"
                        VerticalAlignment="Center"
                        TextTrimming="CharacterEllipsis"
                        Visibility="{Binding IsSummaryPreviewVisible, Converter={StaticResource BoolVisibility}}" />
@@ -74,7 +74,7 @@
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="•"
                                    FontSize="{Binding DataContext.BaseFontSize, RelativeSource={RelativeSource AncestorType=UserControl}, Mode=OneWay}"
-                                   Foreground="{StaticResource MutedBrush}"
+                                   Foreground="{DynamicResource Fg.Muted}"
                                    VerticalAlignment="Top" />
                         <infra:FormattedTextBlock Grid.Column="1"
                                                   FormattedText="{Binding Mode=OneWay}"

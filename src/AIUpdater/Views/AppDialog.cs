@@ -19,8 +19,8 @@ internal static class AppDialog
             Owner = owner, Title = title, Icon = owner?.Icon, Width = 520,
             SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = (Brush)Application.Current.FindResource("WindowBrush"),
-            Foreground = (Brush)Application.Current.FindResource("TextBrush"),
+            Background = (Brush)Application.Current.FindResource("Bg.Base"),
+            Foreground = (Brush)Application.Current.FindResource("Fg.Primary"),
             FontFamily = new("Segoe UI"), FontSize = 13,
             ShowInTaskbar = false,
         };

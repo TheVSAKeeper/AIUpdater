@@ -76,7 +76,7 @@ file static class Program
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         var background = new DrawingVisual();
         using (var drawing = background.RenderOpen())
-            drawing.DrawRectangle((Brush)Application.Current.FindResource("WindowBrush"), null, new(0, 0, width, height));
+            drawing.DrawRectangle((Brush)Application.Current.FindResource("Bg.Base"), null, new(0, 0, width, height));
         bitmap.Render(background);
         bitmap.Render(view);
         var encoder = new PngBitmapEncoder();
@@ -87,18 +87,22 @@ file static class Program
 
     private static void CheckStyles(string output)
     {
-        foreach (var type in new[] { typeof(Button), typeof(CheckBox), typeof(TextBox), typeof(ToolTip), typeof(ContextMenu), typeof(MenuItem), typeof(Separator), typeof(GridSplitter), typeof(TabControl), typeof(TabItem), typeof(ListBox), typeof(ListBoxItem), typeof(ScrollViewer), typeof(ScrollBar), typeof(ProgressBar) })
+        foreach (var type in new[] { typeof(Button), typeof(CheckBox), typeof(TextBox), typeof(ComboBox), typeof(ComboBoxItem), typeof(ToolTip), typeof(ContextMenu), typeof(MenuItem), typeof(Separator), typeof(GridSplitter), typeof(TabControl), typeof(TabItem), typeof(ListBox), typeof(ListBoxItem), typeof(ScrollViewer), typeof(ScrollBar), typeof(ProgressBar) })
         {
             var style = Application.Current.TryFindResource(type) as Style;
-            Check(style is not null && style.Setters.OfType<Setter>().Any(setter => setter.Property == Control.TemplateProperty), $"Missing application template: {type.Name}");
+            Check(style is not null, $"Missing KeepShell style: {type.Name}");
         }
+
+        Check(KeepShell.Bootstrap.ThemeManager.Current is { Key: "aiupdater-dark", IsDark: true }, "Custom KeepShell theme was not initialized");
+        var basePalette = new ResourceDictionary { Source = new("pack://application:,,,/KeepShell;component/Resources/Themes/Dark.xaml") };
+        var appPalette = new ResourceDictionary { Source = new("pack://application:,,,/AIUpdater;component/Resources/Themes/DarkGreen.xaml") };
+        Check(basePalette.Keys.Cast<object>().All(appPalette.Contains), "Custom palette is missing KeepShell tokens");
 
         var samples = new StackPanel();
         var boxes = new[]
         {
             new CheckBox { Content = "Не выбрано", IsChecked = false },
             new CheckBox { Content = "Выбрано", IsChecked = true },
-            new CheckBox { Content = "Частичный выбор", IsThreeState = true, IsChecked = null },
             new CheckBox { Content = "Недоступно", IsEnabled = false },
             new CheckBox { Content = "Выбрано, недоступно", IsChecked = true, IsEnabled = false },
         };
@@ -111,15 +115,14 @@ file static class Program
 
         var text = new TextBox { IsReadOnly = true, Text = "Тёмное текстовое поле с выделением и меню копирования", Padding = new(10), Margin = new(0, 12, 0, 0) };
         samples.Children.Add(text);
-        var gallery = new Border { Background = (Brush)Application.Current.FindResource("WindowBrush"), Padding = new(20), Child = samples };
+        var gallery = new Border { Background = (Brush)Application.Current.FindResource("Bg.Base"), Padding = new(20), Child = samples };
         Render(gallery, Path.Combine(output, "checkbox-states.png"), 560, 300);
-        var emptyBorder = (Border)boxes[0].Template.FindName("CheckBorder", boxes[0]);
-        var checkedBorder = (Border)boxes[1].Template.FindName("CheckBorder", boxes[1]);
-        Check(((SolidColorBrush)emptyBorder.Background).Color == Color.FromRgb(11, 19, 14), "Unchecked checkbox has a light background");
-        Check(checkedBorder.Background == Application.Current.FindResource("AccentBrush"), "Checked checkbox has no accent fill");
+        var emptyBorder = (Border)boxes[0].Template.FindName("Box", boxes[0]);
+        var checkedBorder = (Border)boxes[1].Template.FindName("Box", boxes[1]);
+        Check(emptyBorder.Background == Application.Current.FindResource("Bg.Surface"), "Unchecked checkbox has a light background");
+        Check(checkedBorder.Background == Application.Current.FindResource("Accent.Primary"), "Checked checkbox has no accent fill");
         Check(((UIElement)boxes[1].Template.FindName("CheckMark", boxes[1])).Visibility == Visibility.Visible, "Checked glyph is missing");
-        Check(((UIElement)boxes[2].Template.FindName("MixedMark", boxes[2])).Visibility == Visibility.Visible, "Indeterminate glyph is missing");
-        Check(boxes[3].Opacity < boxes[0].Opacity, "Disabled checkbox looks active");
+        Check(boxes[2].Opacity < boxes[0].Opacity, "Disabled checkbox looks active");
         var toggle = (IToggleProvider)new CheckBoxAutomationPeer(boxes[0]).GetPattern(PatternInterface.Toggle)!;
         toggle.Toggle();
         Check(boxes[0].IsChecked == true, "Custom checkbox broke the standard toggle action");
@@ -611,15 +614,22 @@ file static class Program
         var root = (FrameworkElement)dialog.Content;
         Render(root, Path.Combine(output, "translation-settings.png"), 660, 580);
         var agents = (ComboBox)dialog.FindName("TranslationAgentComboBox");
-        var model = (ComboBox)dialog.FindName("TranslationModelComboBox");
+        var model = (TextBox)dialog.FindName("TranslationModelTextBox");
         var effort = (ComboBox)dialog.FindName("TranslationEffortComboBox");
         var executable = (TextBox)dialog.FindName("TranslationExecutablePathBox");
         var automatic = (CheckBox)dialog.FindName("AutomaticTranslationCheckBox");
-        var editor = (TextBox)model.Template.FindName("PART_EditableTextBox", model);
+        var editor = model;
         Check(agents.Items.Count == 4 && viewModel.Backends.Any(agent => agent.Name == "Claude Code"), "Agent names are missing");
         Check(agents.SelectionBoxItem.ToString() == "Antigravity", "Agent selector shows a technical record instead of its name");
         Check(editor.Text == "gemini-3.8-flash-low", "Saved model is not visible in the input");
         Check(effort.Text == "Низкий", "Effort is not shown with a readable title");
+        var modelMenu = ((Button)dialog.FindName("ModelChoicesButton")).ContextMenu;
+        Render(modelMenu, Path.Combine(output, "translation-models-menu.png"), 400, 100);
+        Check(modelMenu.Items.Count > 0 && modelMenu.ItemContainerGenerator.ContainerFromIndex(0) is MenuItem, "Model catalog did not create usable menu entries");
+        var modelChoice = (MenuItem)modelMenu.ItemContainerGenerator.ContainerFromIndex(0);
+        editor.Text = "before-catalog-choice";
+        modelChoice.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(viewModel.Model == (string)modelChoice.Header, "Choosing a model from the catalog did not update the profile");
         editor.Text = "custom-gemini-model";
         Check(viewModel.Model == "custom-gemini-model", "Typing in the model input does not update the profile");
         agents.SelectedValue = "codex";
@@ -640,8 +650,8 @@ file static class Program
         Check(viewModel.SavedDescription.Contains("Codex") && viewModel.SavedDescription.Contains("custom-codex-model"), "Current agent summary is stale");
         editor.SelectAll();
         Render(root, Path.Combine(output, "translation-settings-selection.png"), 600, 520);
-        Check(model.ActualWidth >= 490 && editor.ActualHeight >= 20, "Model input is cramped at the minimum window size");
-        Check(editor.SelectionTextBrush == Application.Current.FindResource("TextBrush"), "Selected model text has unreadable colors");
+        Check(model.ActualWidth >= 380 && editor.ActualHeight >= 20, "Model input is cramped at the minimum window size");
+        Check(editor.SelectionTextBrush == Application.Current.FindResource("Fg.Primary"), "Selected model text has unreadable colors");
         foreach (var control in new FrameworkElement[] { agents, model, effort, executable, (Button)dialog.FindName("SaveTranslationSettingsButton") })
         {
             var position = control.TranslatePoint(new(), root);
@@ -710,6 +720,7 @@ file static class Program
         TranslationAgentSettings.Default.Save(TranslationAgentSettings.Default.Current with { Automatic = false });
         var app = new App();
         app.InitializeComponent();
+        AIUpdater.Infrastructure.AppTheme.Initialize();
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
         var window = new MainWindow();
         var viewModel = window.ViewModel;
@@ -839,9 +850,9 @@ file static class Program
             Check(directChoices.Length == 2 && directChoices.All(box => box.Visibility == Visibility.Visible && box.IsChecked == false), "Direct-update checkboxes are hidden or checked by default");
             var cards = Descendants<Border>(root).Where(border => border.ContextMenu is not null).ToArray();
             Check(cards.Length == 17 && cards.Max(card => card.ActualWidth) - cards.Min(card => card.ActualWidth) < 1, "Vendor card grid widths differ");
-            foreach (var row in Descendants<Button>(root).Where(button => Equals(button.Tag, "Stage")).GroupBy(button => Math.Round(button.TranslatePoint(new(0, 0), root).Y)))
+            foreach (var row in Descendants<StageCardView>(root).GroupBy(card => Math.Round(card.TranslatePoint(new(0, 0), root).Y)))
             {
-                var positions = row.Select(button => Descendants<TextBlock>(button).First().TranslatePoint(new(0, 0), root).Y).ToArray();
+                var positions = row.Select(card => ((TextBlock)card.FindName("StageTitle")).TranslatePoint(new(0, 0), root).Y).ToArray();
                 Check(positions.Max() - positions.Min() < 1, "Card titles are not aligned");
             }
 

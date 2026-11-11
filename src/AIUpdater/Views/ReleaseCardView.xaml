@@ -97,13 +97,13 @@
                     <TextBlock Text="{Binding Title}"
                                FontSize="{Binding TitleFontSize}"
                                FontWeight="SemiBold"
-                               Foreground="{StaticResource TextBrush}"
+                               Foreground="{DynamicResource Fg.Primary}"
                                TextWrapping="Wrap"
                                Margin="0,0,10,2"
                                VerticalAlignment="Center" />
                     <TextBlock Text="{Binding PublishedAt}"
                                FontSize="{Binding MetaFontSize}"
-                               Foreground="{StaticResource MutedBrush}"
+                               Foreground="{DynamicResource Fg.Muted}"
                                VerticalAlignment="Center"
                                Margin="0,0,10,2"
                                Visibility="{Binding HasPublishedAt, Converter={StaticResource BoolVisibility}}" />
@@ -164,12 +164,12 @@
                         Visibility="{Binding IsTranslating, Converter={StaticResource BoolVisibility}}">
                 <TextBlock Text="{Binding TranslationProgressText}"
                            FontSize="{Binding MetaFontSize}"
-                           Foreground="{StaticResource AccentTextBrush}"
+                           Foreground="{DynamicResource Accent.Text}"
                            TextWrapping="Wrap"
                            Margin="0,0,0,5" />
                 <ProgressBar Height="2"
                              Background="#16261E"
-                             Foreground="{StaticResource AccentBrush}"
+                             Foreground="{DynamicResource Accent.Primary}"
                              BorderThickness="0"
                              IsIndeterminate="True" />
             </StackPanel>

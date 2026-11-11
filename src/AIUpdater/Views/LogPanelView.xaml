@@ -19,7 +19,7 @@
                 <TextBlock DockPanel.Dock="Top"
                            Margin="10,3,10,3"
                            FontSize="11"
-                           Foreground="{StaticResource MutedBrush}"
+                           Foreground="{DynamicResource Fg.Muted}"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"
                            Text="{Binding Detail}"

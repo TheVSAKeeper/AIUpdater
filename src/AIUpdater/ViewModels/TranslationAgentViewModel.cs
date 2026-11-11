@@ -59,7 +59,15 @@ public sealed class TranslationAgentViewModel : ObservableObject
     public bool Automatic { get; set => SetProperty(ref field, value); }
     public string Status { get; private set => SetProperty(ref field, value); } = "";
     public string DetectedPath { get; private set => SetProperty(ref field, value); } = "";
-    public IReadOnlyList<string> Models { get; private set => SetProperty(ref field, value); } = [];
+    public IReadOnlyList<string> Models
+    {
+        get;
+        private set
+        {
+            if (SetProperty(ref field, value)) OnPropertyChanged(nameof(HasModels));
+        }
+    } = [];
+    public bool HasModels => Models.Count > 0;
     public IReadOnlyList<AgentEffortOption> Efforts { get; private set => SetProperty(ref field, value); } = [];
     public IRelayCommand SaveCommand { get; }
     public IAsyncRelayCommand DetectCommand { get; }

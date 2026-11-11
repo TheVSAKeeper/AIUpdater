@@ -51,7 +51,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
     public string LogDirectory { get; }
 
     private static Brush AccentTextBrush =>
-        Application.Current?.TryFindResource("AccentTextBrush") as Brush
+        Application.Current?.TryFindResource("Accent.Text") as Brush
         ?? new SolidColorBrush(Color.FromRgb(110, 231, 183));
 
     public static OperationState GetOperationState(string action, bool checkOnly) => action switch

@@ -3,88 +3,17 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Агент перевода – AI Updater" Icon="/AIUpdater;component/Assets/AIUpdater.ico"
         Width="660" Height="610" MinWidth="600" MinHeight="550"
-        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
+        Background="{DynamicResource Bg.Base}" Foreground="{DynamicResource Fg.Primary}"
         FontFamily="Segoe UI" FontSize="13" WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
     <Window.Resources>
-        <Style TargetType="ComboBoxItem">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="Background" Value="#102219" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ComboBoxItem">
-                        <Border x:Name="ItemBorder" Background="{TemplateBinding Background}" Padding="12,8">
-                            <ContentPresenter />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsHighlighted" Value="True">
-                                <Setter TargetName="ItemBorder" Property="Background" Value="#214D37" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style TargetType="ComboBox">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="Background" Value="#0C1712" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
-            <Setter Property="MinHeight" Value="38" />
-            <Setter Property="MaxDropDownHeight" Value="240" />
-            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ComboBox">
-                        <Grid>
-                            <Border x:Name="ComboBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="4" />
-                            <ToggleButton x:Name="DropDownButton" Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
-                                <ToggleButton.Template>
-                                    <ControlTemplate TargetType="ToggleButton">
-                                        <Border Background="Transparent">
-                                            <TextBlock Text="▾" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,13,0" />
-                                        </Border>
-                                    </ControlTemplate>
-                                </ToggleButton.Template>
-                            </ToggleButton>
-                            <ContentPresenter x:Name="Selection" Content="{TemplateBinding SelectionBoxItem}"
-                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
-                                              IsHitTestVisible="False" VerticalAlignment="Center" Margin="12,0,34,0" />
-                            <TextBox x:Name="PART_EditableTextBox" Style="{x:Null}" Visibility="Collapsed"
-                                     Background="Transparent" Foreground="{TemplateBinding Foreground}"
-                                     CaretBrush="{StaticResource AccentTextBrush}" SelectionBrush="#245C40"
-                                     SelectionTextBrush="{StaticResource TextBrush}" SelectionOpacity="1" IsInactiveSelectionHighlightEnabled="True"
-                                     BorderThickness="0" Margin="12,0,34,0" VerticalContentAlignment="Center"
-                                     FocusVisualStyle="{x:Null}">
-                                <TextBox.Template>
-                                    <ControlTemplate TargetType="TextBox">
-                                        <ScrollViewer x:Name="PART_ContentHost" Style="{x:Null}" Focusable="False" />
-                                    </ControlTemplate>
-                                </TextBox.Template>
-                            </TextBox>
-                            <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
-                                <Border Background="#102219" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="3" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
-                                    <ScrollViewer CanContentScroll="True"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" /></ScrollViewer>
-                                </Border>
-                            </Popup>
-                        </Grid>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="HasItems" Value="False">
-                                <Setter TargetName="DropDownButton" Property="IsEnabled" Value="False" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.5" />
-                            </Trigger>
-                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="#6DCAA1" />
-                            </Trigger>
-                            <Trigger Property="IsEditable" Value="True">
-                                <Setter TargetName="Selection" Property="Visibility" Value="Collapsed" />
-                                <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+        <ContextMenu x:Key="ModelChoicesMenu" ItemsSource="{Binding Models}">
+            <ContextMenu.ItemContainerStyle>
+                <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                    <Setter Property="Header" Value="{Binding}" />
+                    <EventSetter Event="Click" Handler="ModelChoice_Click" />
+                </Style>
+            </ContextMenu.ItemContainerStyle>
+        </ContextMenu>
     </Window.Resources>
     <Grid Margin="24">
         <Grid.RowDefinitions>
@@ -95,7 +24,7 @@
         <StackPanel Margin="0,0,0,22">
             <TextBlock Text="Перевод журнала изменений" FontSize="22" FontWeight="SemiBold" />
             <TextBlock Text="Агент переведёт выпуски и подготовит краткое описание."
-                       Foreground="{StaticResource MutedBrush}" Margin="0,7,0,0" TextWrapping="Wrap" />
+                       Foreground="{DynamicResource Fg.Muted}" Margin="0,7,0,0" TextWrapping="Wrap" />
         </StackPanel>
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Margin="0,0,2,0">
@@ -116,11 +45,17 @@
                     </StackPanel>
                 </Grid>
                 <TextBlock Text="Модель" Margin="0,18,0,7" />
-                <ComboBox x:Name="TranslationModelComboBox" IsEditable="True" IsTextSearchEnabled="False"
-                          StaysOpenOnEdit="True" ItemsSource="{Binding Models}"
-                          Text="{Binding Model, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="TranslationModelTextBox" Text="{Binding Model, UpdateSourceTrigger=PropertyChanged}" />
+                    <Button x:Name="ModelChoicesButton" Grid.Column="1" Content="Выбрать…" Margin="8,0,0,0"
+                            IsEnabled="{Binding HasModels}" Click="ModelChoices_Click" ContextMenu="{StaticResource ModelChoicesMenu}" />
+                </Grid>
                 <TextBlock Text="Выберите из списка или введите ID. Пусто – модель по умолчанию в CLI."
-                           Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,7,0,0" TextWrapping="Wrap" />
+                           Foreground="{DynamicResource Fg.Muted}" FontSize="12" Margin="0,7,0,0" TextWrapping="Wrap" />
                 <CheckBox x:Name="AutomaticTranslationCheckBox" Content="Переводить новые выпуски автоматически"
                           IsChecked="{Binding Automatic}" Margin="0,22,0,22" />
                 <TextBlock Text="Путь к CLI" Margin="0,0,0,7" />
@@ -134,7 +69,7 @@
                     <Button Grid.Column="1" Content="Обзор…" Click="BrowseExecutable_Click" Margin="8,0,0,0" Padding="14,8" />
                 </Grid>
                 <TextBlock Text="Оставьте пустым для автоматического поиска установленного агента."
-                           Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,7,0,0" TextWrapping="Wrap" />
+                           Foreground="{DynamicResource Fg.Muted}" FontSize="12" Margin="0,7,0,0" TextWrapping="Wrap" />
                 <Grid Margin="0,16,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -143,16 +78,16 @@
                     <Button x:Name="DetectTranslationCliButton" Content="Проверить CLI" Command="{Binding DetectCommand}"
                             MinHeight="34" Padding="12,6" VerticalAlignment="Top" />
                     <TextBlock x:Name="TranslationCliStatus" Grid.Column="1" Text="{Binding Status}"
-                               ToolTip="{Binding DetectedPath}" Foreground="{StaticResource MutedBrush}"
+                               ToolTip="{Binding DetectedPath}" Foreground="{DynamicResource Fg.Muted}"
                                Margin="12,2,0,0" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </Grid>
             </StackPanel>
         </ScrollViewer>
-        <Border Grid.Row="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,16,0,0" Margin="0,20,0,0">
+        <Border Grid.Row="2" BorderBrush="{DynamicResource Border.Default}" BorderThickness="0,1,0,0" Padding="0,16,0,0" Margin="0,20,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="Отмена" IsCancel="True" MinWidth="100" Margin="0,0,8,0" />
                 <Button x:Name="SaveTranslationSettingsButton" Content="Сохранить" Command="{Binding SaveCommand}"
-                        IsDefault="True" MinWidth="120" Background="#16432E" BorderBrush="#367957" />
+                        IsDefault="True" MinWidth="120" Style="{DynamicResource Button.Primary}" />
             </StackPanel>
         </Border>
     </Grid>

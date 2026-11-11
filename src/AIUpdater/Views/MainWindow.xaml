@@ -10,8 +10,8 @@
         MinWidth="980"
         MinHeight="700"
         FontFamily="Segoe UI"
-        Background="{StaticResource WindowBrush}"
-        Foreground="{StaticResource TextBrush}"
+        Background="{DynamicResource Bg.Base}"
+        Foreground="{DynamicResource Fg.Primary}"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolVisibility" />
@@ -20,7 +20,7 @@
         </DataTemplate>
     </Window.Resources>
     <Grid Margin="24,16"
-          Background="{StaticResource WindowBrush}">
+          Background="{DynamicResource Bg.Base}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="1.35*" MinHeight="170" />
@@ -54,7 +54,7 @@
                             Height="20"
                             CornerRadius="10"
                             Background="#162820"
-                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderBrush="{DynamicResource Border.Default}"
                             BorderThickness="1"
                             Margin="9,2,0,0"
                             VerticalAlignment="Center"
@@ -64,7 +64,7 @@
                         <TextBlock Text="?"
                                    FontSize="11"
                                    FontWeight="SemiBold"
-                                   Foreground="{StaticResource MutedBrush}"
+                                   Foreground="{DynamicResource Fg.Muted}"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center" />
                     </Border>
@@ -73,7 +73,7 @@
                            Text="{Binding OverallStatusText}"
                            Margin="0,3,0,0"
                            FontSize="12"
-                           Foreground="{StaticResource MutedBrush}"
+                           Foreground="{DynamicResource Fg.Muted}"
                            TextWrapping="Wrap" />
             </StackPanel>
             <StackPanel Grid.Column="2"
@@ -95,10 +95,7 @@
                 <Button x:Name="UpdateButton"
                         Content="{Binding UpdateButtonText}"
                         Command="{Binding UpdateSelectedCommand}"
-                        Background="{StaticResource AccentBrush}"
-                        BorderBrush="{StaticResource AccentBrush}"
-                        Foreground="#052417"
-                        FontWeight="SemiBold" />
+                        Style="{DynamicResource Button.Primary}" />
             </StackPanel>
         </Grid>
         <ScrollViewer Grid.Row="1"
@@ -110,8 +107,8 @@
                           Margin="0,0,0,6">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Border Background="{StaticResource SurfaceBrush}"
-                                BorderBrush="{StaticResource BorderBrush}"
+                        <Border Background="{DynamicResource Bg.Surface}"
+                                BorderBrush="{DynamicResource Border.Default}"
                                 BorderThickness="1"
                                 CornerRadius="12"
                                 Padding="14,6"
@@ -169,8 +166,8 @@
                          Height="3"
                          IsIndeterminate="True"
                          Visibility="{Binding IsRunning, Converter={StaticResource BoolVisibility}}"
-                         Foreground="{StaticResource AccentBrush}"
-                         Background="{StaticResource BorderBrush}" />
+                         Foreground="{DynamicResource Accent.Primary}"
+                         Background="{DynamicResource Border.Default}" />
         </Grid>
     </Grid>
 </Window>

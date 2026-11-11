@@ -13,6 +13,7 @@ public partial class TranslationAgentWindow : Window
         ViewModel.Reset();
         DataContext = ViewModel;
         InitializeComponent();
+        ModelChoicesButton.ContextMenu.DataContext = ViewModel;
         SourceInitialized += (_, _) => WindowTheme.Apply(this);
         ViewModel.Saved += OnSaved;
         Loaded += async (_, _) => await ViewModel.DetectCommand.ExecuteAsync(null);
@@ -29,6 +30,17 @@ public partial class TranslationAgentWindow : Window
     private void OnSaved()
     {
         if (IsVisible) DialogResult = true;
+    }
+
+    private void ModelChoices_Click(object sender, RoutedEventArgs e)
+    {
+        ModelChoicesButton.ContextMenu.PlacementTarget = ModelChoicesButton;
+        ModelChoicesButton.ContextMenu.IsOpen = true;
+    }
+
+    private void ModelChoice_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.MenuItem { Header: string model }) ViewModel.Model = model;
     }
 
     private void BrowseExecutable_Click(object sender, RoutedEventArgs e)

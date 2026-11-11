@@ -5,7 +5,7 @@
         <BooleanToVisibilityConverter x:Key="BoolVisibility" />
     </UserControl.Resources>
     <Border x:Name="CardBorder"
-            Background="#182A21"
+            Background="{DynamicResource Bg.SurfaceAlt}"
             CornerRadius="9"
             Margin="6,0,0,0"
             BorderThickness="1"
@@ -31,12 +31,12 @@
         <Border.Style>
             <Style TargetType="Border">
                 <Setter Property="BorderBrush"
-                        Value="{StaticResource BorderBrush}" />
+                        Value="{DynamicResource Border.Default}" />
                 <Style.Triggers>
                     <Trigger Property="IsMouseOver"
                              Value="True">
                         <Setter Property="BorderBrush"
-                                Value="{StaticResource AccentTextBrush}" />
+                                Value="{DynamicResource Accent.Text}" />
                     </Trigger>
                     <DataTrigger Binding="{Binding Stage.PackageStatus}"
                                  Value="NotInstalled">
@@ -61,8 +61,8 @@
                       Visibility="{Binding CanSelectForUpdate, Converter={StaticResource BoolVisibility}}"
                       ToolTip="Выбрать для обновления"
                       AutomationProperties.Name="{Binding Name, StringFormat=Выбрать для обновления: {0}}" />
-            <Button Grid.Column="1"
-                    Tag="Stage"
+            <Grid Grid.Column="1">
+                <Button Tag="Stage"
                     Command="{Binding DataContext.SelectOrCheckCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                     HorizontalContentAlignment="Stretch"
                     Padding="2"
@@ -71,11 +71,12 @@
                     BorderThickness="0"
                     ToolTip="{Binding ResultDescription}"
                     VerticalContentAlignment="Top"
-                    AutomationProperties.Name="{Binding CardActionName}">
-                <StackPanel VerticalAlignment="Top">
-                    <TextBlock Text="{Binding Name}"
+                    AutomationProperties.Name="{Binding CardActionName}" />
+                <StackPanel VerticalAlignment="Top" IsHitTestVisible="False" Margin="2">
+                    <TextBlock x:Name="StageTitle" Text="{Binding Name}"
                                FontSize="12"
                                FontWeight="SemiBold"
+                               TextWrapping="NoWrap"
                                TextTrimming="CharacterEllipsis"
                                ToolTip="{Binding Name}" />
                     <Grid Margin="0,4,0,0">
@@ -103,7 +104,7 @@
                              Foreground="{Binding VersionTargetBrush}" />
                     </TextBlock>
                 </StackPanel>
-            </Button>
+            </Grid>
             <Button Grid.Column="2"
                     Content="⋮"
                     MinHeight="26"
