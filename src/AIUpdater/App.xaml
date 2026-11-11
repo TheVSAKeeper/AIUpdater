@@ -4,37 +4,8 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="pack://application:,,,/AIUpdater;component/Resources/Themes/DarkGreen.xaml" />
-                <ResourceDictionary Source="pack://application:,,,/KeepShell;component/Resources/Themes/Tokens.xaml" />
-                <ResourceDictionary Source="pack://application:,,,/KeepShell;component/Resources/Converters.xaml" />
-                <ResourceDictionary Source="pack://application:,,,/KeepShell;component/Resources/Styles/Controls.xaml" />
+                <ResourceDictionary Source="pack://application:,,,/AIUpdater;component/Bootstrap/Resources.xaml" />
             </ResourceDictionary.MergedDictionaries>
-            <FontFamily x:Key="Font.Display">Segoe UI</FontFamily>
-            <Style TargetType="TextBox" BasedOn="{StaticResource TextBox.Form}">
-                <Setter Property="SelectionTextBrush" Value="{DynamicResource Fg.Primary}" />
-                <Setter Property="ContextMenu">
-                    <Setter.Value>
-                        <ContextMenu>
-                            <MenuItem Header="Вырезать" Command="Cut" CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                            <MenuItem Header="Копировать" Command="Copy" CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                            <MenuItem Header="Вставить" Command="Paste" CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                            <MenuItem Header="Выделить всё" Command="SelectAll" CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                        </ContextMenu>
-                    </Setter.Value>
-                </Setter>
-                <Style.Triggers>
-                    <Trigger Property="IsReadOnly" Value="True">
-                        <Setter Property="ContextMenu">
-                            <Setter.Value>
-                                <ContextMenu>
-                                    <MenuItem Header="Копировать" Command="Copy" CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                    <MenuItem Header="Выделить всё" Command="SelectAll" CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                </ContextMenu>
-                            </Setter.Value>
-                        </Setter>
-                    </Trigger>
-                </Style.Triggers>
-            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

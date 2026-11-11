@@ -6,15 +6,17 @@ using System.Collections.ObjectModel;
 
 namespace AIUpdater.ViewModels;
 
-public sealed class LogPanelViewModel : ObservableObject
+public sealed class LogPanelViewModel : ObservableObject, KeepShell.ViewModels.IPageHeader
 {
+    public string PageTitle => "Журнал";
+    public string PageDescription => "Последняя операция и история по поставщикам";
     private readonly IUpdaterExecutionService _executionService;
-    private readonly IDialogService _dialogService;
+    private readonly IUpdaterDialogs _dialogService;
 
     public LogPanelViewModel(
         ObservableCollection<VendorStatus> vendors,
         IUpdaterExecutionService executionService,
-        IDialogService dialogService)
+        IUpdaterDialogs dialogService)
     {
         Vendors = vendors;
         _executionService = executionService;

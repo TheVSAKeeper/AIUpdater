@@ -7,28 +7,21 @@ using System.Collections.ObjectModel;
 
 namespace AIUpdater.ViewModels;
 
-public sealed class MainViewModel : ObservableObject
+using KeepShell.ViewModels;
+
+public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, IPageRefresh
 {
     private readonly IUpdaterExecutionService _executionService;
-    private readonly IDialogService _dialogService;
+    private readonly IUpdaterDialogs _dialogService;
     private CancellationTokenSource? _runCancellation;
     private UpdateStage[] _runStages = [];
     private string _action = "Update";
     private bool _checkOnly;
     private bool _stopRequested;
-
-    public MainViewModel()
-        : this(
-            new UpdaterExecutionService(
-                new FileStageResultStore(),
-                new PowerShellProcessRunner(),
-                new UpdaterOutputParser()),
-            new WpfDialogService(new ChangelogService()))
-    {
-    }
+    private TaskCompletionSource? _runCompletion;
 
     [ActivatorUtilitiesConstructor]
-    public MainViewModel(IUpdaterExecutionService executionService, IDialogService dialogService)
+    public MainViewModel(IUpdaterExecutionService executionService, IUpdaterDialogs dialogService)
     {
         _executionService = executionService;
         _dialogService = dialogService;
@@ -55,7 +48,7 @@ public sealed class MainViewModel : ObservableObject
                     s => RunUpdaterAsync(s, checkOnly: false),
                     s => ExecuteComponentActionAsync(s, "Install"),
                     s => ExecuteComponentActionAsync(s, "Uninstall"),
-                    s => _dialogService.OpenChangelog(Stages, s)))
+                    s => _dialogService.OpenChangelog(s)))
                 .ToArray();
 
             var status = new VendorStatus(vendor, _executionService.GetVendorLogPath(vendor)) { Stages = vendorStages, Cards = cards };
@@ -82,7 +75,21 @@ public sealed class MainViewModel : ObservableObject
     public IAsyncRelayCommand UpdateSelectedCommand { get; }
     public IRelayCommand StopCommand { get; }
     public IRelayCommand<object> OpenChangelogCommand { get; }
-    public string OverallStatusText { get; set => SetProperty(ref field, value); } = "Готов к работе";
+    public string OverallStatusText
+    {
+        get;
+        set { if (SetProperty(ref field, value)) OnPropertyChanged(nameof(StatusCaption)); }
+    } = "Готов к работе";
+    public string PageTitle => "Обновления";
+    public string PageDescription => "Проверка и обновление инструментов";
+    public string StatusCaption => OverallStatusText;
+    public bool IsBusy => IsRunning;
+    public bool IsIndeterminate => IsRunning;
+    public double ProgressValue => 0;
+    public double ProgressMax => 1;
+    public System.Windows.Input.ICommand CancelCommand => StopCommand;
+    public System.Windows.Input.ICommand RefreshCommand => CheckAllCommand;
+    public string RefreshTooltip => "Проверить все инструменты";
     public string UpdateButtonText { get; private set => SetProperty(ref field, value); } = "Обновить выбранные (0)";
 
     public bool CanUpdateSelected
@@ -105,6 +112,8 @@ public sealed class MainViewModel : ObservableObject
             if (SetProperty(ref field, value))
             {
                 OnPropertyChanged(nameof(CanStartRun));
+                OnPropertyChanged(nameof(IsBusy));
+                OnPropertyChanged(nameof(IsIndeterminate));
                 CheckAllCommand.NotifyCanExecuteChanged();
                 StopCommand.NotifyCanExecuteChanged();
                 RefreshUpdateButtonState();
@@ -159,6 +168,7 @@ public sealed class MainViewModel : ObservableObject
         var sawError = false;
         var exitCode = -1;
         using var cts = _runCancellation = new CancellationTokenSource();
+        _runCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
             LogPanel.GeneralLogText = "";
@@ -181,6 +191,7 @@ public sealed class MainViewModel : ObservableObject
             {
                 _runCancellation = null;
             }
+            _runCompletion.TrySetResult();
         }
     }
 
@@ -224,7 +235,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        if (action == "Uninstall" && !_dialogService.Confirm($"Удалить {stage.Name}?", "Удаление компонента"))
+        if (action == "Uninstall" && !await _dialogService.ConfirmAsync($"Удалить {stage.Name}?", "Удаление компонента", "Удалить"))
         {
             return;
         }
@@ -251,10 +262,17 @@ public sealed class MainViewModel : ObservableObject
         AppendLine("Остановка запрошена пользователем.");
     }
 
+    public Task StopAsync()
+    {
+        var completion = _runCompletion?.Task ?? Task.CompletedTask;
+        RequestStop();
+        return completion;
+    }
+
     private void OpenChangelogFromTab(object? parameter)
     {
         var vendor = parameter as VendorStatus ?? LogPanel.SelectedVendor;
-        _dialogService.OpenChangelog(Stages, vendor?.Stages.FirstOrDefault());
+        _dialogService.OpenChangelog(vendor?.Stages.FirstOrDefault());
     }
 
     private void RefreshUpdateButtonState()

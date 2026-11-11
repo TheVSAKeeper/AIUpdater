@@ -18,27 +18,6 @@ public partial class LogPanelView : UserControl
 
     public LogPanelViewModel? ViewModel => DataContext as LogPanelViewModel;
 
-    public void RegisterNames(FrameworkElement scope)
-    {
-        EnsureVendorTabs();
-        RegisterControlName(scope, nameof(LogTabs), LogTabs);
-        RegisterControlName(scope, nameof(LogTextBox), LogTextBox);
-        RegisterControlName(scope, nameof(LogZoomInButton), LogZoomInButton);
-        RegisterControlName(scope, nameof(LogZoomOutButton), LogZoomOutButton);
-        RegisterControlName(scope, nameof(OpenLogButton), OpenLogButton);
-        RegisterControlName(scope, nameof(LogFolderButton), LogFolderButton);
-    }
-
-    private static void RegisterControlName(FrameworkElement scope, string name, object element)
-    {
-        if (scope.FindName(name) is not null)
-        {
-            scope.UnregisterName(name);
-        }
-
-        scope.RegisterName(name, element);
-    }
-
     private void EnsureVendorTabs()
     {
         if (ViewModel is null || ReferenceEquals(_initializedViewModel, ViewModel))
@@ -53,7 +32,6 @@ public partial class LogPanelView : UserControl
         }
 
         var headerTemplate = (DataTemplate)FindResource("VendorTabHeaderTemplate");
-        var contentTemplate = (DataTemplate)FindResource("VendorTabContentTemplate");
         foreach (var vendor in ViewModel.Vendors)
         {
             LogTabs.Items.Add(new TabItem
@@ -62,7 +40,6 @@ public partial class LogPanelView : UserControl
                 Header = vendor,
                 HeaderTemplate = headerTemplate,
                 Content = vendor,
-                ContentTemplate = contentTemplate,
             });
         }
     }

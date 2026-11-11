@@ -27,6 +27,7 @@ public sealed class TranslationAgentSettings
 {
     public static TranslationAgentSettings Default { get; internal set; } = new();
     private readonly object _gate = new();
+    private readonly KeepShell.Bootstrap.ISettingsStore? _store;
     public string FilePath { get; }
     public int Generation { get; private set; }
     public TranslationAgentSelection Current { get; private set; }
@@ -47,7 +48,7 @@ public sealed class TranslationAgentSettings
         }
     }
 
-    public TranslationAgentSettings(string? path = null)
+    internal TranslationAgentSettings(string? path = null)
     {
         FilePath = path ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AIUpdater", "translation-agent.json");
         Current = new();
@@ -62,11 +63,40 @@ public sealed class TranslationAgentSettings
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException) { }
     }
 
+    public TranslationAgentSettings(KeepShell.Bootstrap.ISettingsStore settings, AIUpdater.Bootstrap.AppPaths paths)
+        : this(paths.LegacyAgentSettingsFile)
+    {
+        _store = settings;
+        FilePath = settings.FilePath;
+        var saved = settings.GetStringValue(AIUpdater.Bootstrap.SettingsKeys.TranslationSelection);
+        if (saved is not null)
+        {
+            try
+            {
+                var loaded = JsonSerializer.Deserialize<TranslationAgentSelection>(saved);
+                if (loaded is not null && loaded.Profiles is not null && AgentBackendFactory.Ids.Contains(loaded.BackendId)) Current = loaded;
+            }
+            catch (JsonException) { }
+        }
+        else if (File.Exists(paths.LegacyAgentSettingsFile))
+        {
+            settings.SetValue(AIUpdater.Bootstrap.SettingsKeys.TranslationSelection, JsonSerializer.Serialize(Current));
+            settings.Flush();
+        }
+    }
+
     public void Save(TranslationAgentSelection selection)
     {
         if (!AgentBackendFactory.Ids.Contains(selection.BackendId)) throw new ArgumentException("Неизвестный агент.");
         lock (_gate)
         {
+            if (_store is not null)
+            {
+                _store.SetValue(AIUpdater.Bootstrap.SettingsKeys.TranslationSelection, JsonSerializer.Serialize(selection));
+                _store.Flush();
+            }
+            else
+            {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
             var temporary = FilePath + ".tmp";
             try
@@ -75,6 +105,7 @@ public sealed class TranslationAgentSettings
                 File.Move(temporary, FilePath, true);
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            }
             Current = selection;
             Generation++;
         }

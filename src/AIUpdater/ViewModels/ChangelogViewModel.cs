@@ -9,31 +9,32 @@ using System.Windows.Data;
 
 namespace AIUpdater.ViewModels;
 
-public sealed class ChangelogViewModel : ObservableObject, IDisposable
+public sealed class ChangelogViewModel : ObservableObject, IDisposable, KeepShell.ViewModels.IPageHeader, KeepShell.ViewModels.IPageRefresh
 {
     public const double DefaultFontSize = 14;
     private readonly IChangelogService _changelogService;
-    private readonly IDialogService? _dialogService;
+    private readonly IUpdaterDialogs? _dialogService;
     private readonly UpdateStage[] _allStages;
     private readonly CollectionViewSource? _stagesViewSource;
     private readonly ChangelogPresentationState _state;
     private bool _suppressTextSync;
 
     [ActivatorUtilitiesConstructor]
-    public ChangelogViewModel(IChangelogService changelogService, IDialogService dialogService)
-        : this(UpdateStage.CreateCatalog(), null, changelogService, dialogService)
+    public ChangelogViewModel(MainViewModel updates, IChangelogService changelogService, IUpdaterDialogs dialogService, TranslationAgentViewModel agentSettings)
+        : this(updates.Stages, null, changelogService, dialogService, agentSettings)
     {
     }
 
-    public ChangelogViewModel(
+    internal ChangelogViewModel(
         IEnumerable<UpdateStage> stages,
         UpdateStage? selected = null,
         IChangelogService? changelogService = null,
-        IDialogService? dialogService = null)
+        IUpdaterDialogs? dialogService = null,
+        TranslationAgentViewModel? agentSettings = null)
     {
         _changelogService = changelogService ?? new ChangelogService();
         _dialogService = dialogService;
-        AgentSettings = new(_changelogService.Translator.Settings);
+        AgentSettings = agentSettings ?? new(_changelogService.Translator.Settings);
         _changelogService.Translator.Settings.Changed += OnAgentChanged;
         _allStages = stages.ToArray();
         _state = new ChangelogPresentationState(UpdateTranslationBannerLiveText);
@@ -45,6 +46,7 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
         ZoomOutCommand = new RelayCommand(() => SetBaseFontSize(BaseFontSize - 1));
         ZoomResetCommand = new RelayCommand(() => SetBaseFontSize(DefaultFontSize));
         OpenSourceCommand = new RelayCommand(OpenSource, () => CanOpenSource);
+        OpenAgentSettingsCommand = new RelayCommand(() => _dialogService?.OpenSettings());
         UpdateChannelButtonState();
         UpdateLanguageButtonText();
 
@@ -60,6 +62,11 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
     }
 
     public TranslationAgentViewModel AgentSettings { get; }
+    public IRelayCommand OpenAgentSettingsCommand { get; }
+    public string PageTitle => "Что нового";
+    public string PageDescription => "История выпусков, перевод и краткие описания";
+    System.Windows.Input.ICommand KeepShell.ViewModels.IPageRefresh.RefreshCommand => RefreshCommand;
+    public string RefreshTooltip => "Проверить новые выпуски выбранного компонента";
     private void OnAgentChanged() { _state.CancelTranslation(); if (_state.CurrentStage is { } stage) UpdateSourceHeader(stage); }
     public event Action? ScrollToHomeRequested;
     public ICollectionView? StagesView { get; }

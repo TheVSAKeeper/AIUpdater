@@ -1,0 +1,12 @@
+﻿<UserControl x:Class="AIUpdater.Views.StatusBarView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources><BooleanToVisibilityConverter x:Key="BoolVisibility" /></UserControl.Resources>
+    <Border Background="{DynamicResource Bg.Surface}" BorderBrush="{DynamicResource Border.Subtle}" BorderThickness="0,1,0,0" Padding="14,6">
+        <DockPanel>
+            <Button DockPanel.Dock="Right" Content="Остановить" Command="{Binding Updates.StopCommand}" Style="{DynamicResource Button.Ghost}"
+                    MinHeight="26" Padding="10,3" Visibility="{Binding IsBusy, Converter={StaticResource BoolVisibility}}" />
+            <TextBlock Text="{Binding OperationCaption}" Foreground="{DynamicResource Fg.Secondary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+        </DockPanel>
+    </Border>
+</UserControl>

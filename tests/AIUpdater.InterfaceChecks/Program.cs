@@ -15,7 +15,7 @@ using System.Windows.Threading;
 
 namespace AIUpdater.InterfaceChecks;
 
-file static class Program
+internal static partial class Program
 {
     private static void Check(bool condition, string message)
     {
@@ -138,8 +138,9 @@ file static class Program
         Render(textMenu, Path.Combine(output, "text-menu.png"), 260, 90);
         var tooltip = new ToolTip { Content = "Причина последней проверки. Подсказка использует ту же тёмную палитру." };
         Render(tooltip, Path.Combine(output, "tooltip.png"), 350, 70);
-        var changelog = new ChangelogWindow([]);
+        var changelog = new ChangelogFixture([]);
         var list = (ListBox)changelog.FindName("ComponentList");
+        System.Windows.Data.BindingOperations.ClearBinding(list, Selector.SelectedItemProperty);
         list.ItemsSource = new[] { new { Name = "ChatGPT / Codex" }, new { Name = "Claude Code" }, new { Name = "Antigravity CLI" } };
         list.SelectedIndex = 0;
         ((TextBox)changelog.FindName("ChangelogTextBox")).Text = "Пример содержимого окна «Что нового».\nПроверка тёмных рамок, списка, выделения и полосы прокрутки.";
@@ -152,13 +153,16 @@ file static class Program
         var settingsPosition = settingsButton.TranslatePoint(new(), (UIElement)changelog.Content);
         Check(settingsPosition.X >= 0 && settingsPosition.X + settingsButton.ActualWidth <= 860, "Translation settings are clipped in the narrow changelog window");
         changelog.Close();
-        var dialog = AppDialog.Create(null, "Удалить выбранный компонент?", "Удаление компонента", true);
-        ((Grid)dialog.Content).Background = dialog.Background;
+        var dialogModel = new MessageDialogViewModel("Удаление компонента", "Удалить выбранный компонент?", true, "Удалить");
+        var dialog = new MessageDialogView { DataContext = dialogModel };
         Render((FrameworkElement)dialog.Content, Path.Combine(output, "confirmation.png"), 520, 170);
         var dialogButtons = Descendants<Button>((DependencyObject)dialog.Content).ToArray();
-        Check(dialogButtons.Single(button => Equals(button.Content, "Отмена")) is { IsDefault: true, IsCancel: true }, "Delete confirmation lost its safe default");
+        Check(dialogButtons.Single(button => Equals(button.Content, "Отмена")) is { IsDefault: true }, "Delete confirmation lost its safe default");
         Check(!dialogButtons.Single(button => Equals(button.Content, "Удалить")).IsDefault, "Delete became the default action");
-        dialog.Close();
+        var modal = new KeepShell.ViewModels.ModalHostViewModel();
+        var confirmation = modal.ShowAsync(dialogModel);
+        dialogModel.TryAccept();
+        Check(!AwaitResult(confirmation), "Enter accepted a destructive confirmation");
     }
 
     private static void CheckIcon(string output)
@@ -194,13 +198,12 @@ file static class Program
         encoder.Save(stream);
     }
 
-    private static void CheckChangelog(string output, IReadOnlyCollection<UpdateStage> stages)
+    private static void CheckChangelog(string output, IReadOnlyCollection<UpdateStage> stages, IServiceProvider provider)
     {
-        using var provider = ServiceCollectionExtensions.CreateDefaultServiceProvider();
         var parsers = provider.GetServices<IChangelogFormatParser>().ToArray();
         Check(parsers.Length == 9, "DI container did not register all 9 IChangelogFormatParser strategies");
         var resolvedMainVm = provider.GetRequiredService<MainViewModel>();
-        using var resolvedChangelogVm = provider.GetRequiredService<ChangelogViewModel>();
+        var resolvedChangelogVm = provider.GetRequiredService<ChangelogViewModel>();
         Check(resolvedMainVm.Stages.Count == 17 && resolvedChangelogVm.HasStages, "DI container did not resolve MainViewModel and ChangelogViewModel");
 
         var cacheDir = Path.Combine(output, "changelog-cache-" + Guid.NewGuid().ToString("N"));
@@ -416,7 +419,7 @@ file static class Program
             "Translated release was not persisted to disk cache");
 
         var agyStage = stages.First(s => s.Id == "Antigravity CLI");
-        var changelogWindow = new ChangelogWindow(stages, agyStage, changelogService);
+        var changelogWindow = new ChangelogFixture(stages, agyStage, changelogService);
         var changelogVm = changelogWindow.ViewModel;
         var componentList = (ListBox)changelogWindow.FindName("ComponentList");
         Check(componentList.Items.Groups?.Count == 5, "ChangelogWindow did not group components by Vendor into 5 groups");
@@ -610,7 +613,7 @@ file static class Program
         var settings = new TranslationAgentSettings(Path.Combine(output, "agent-settings-ui.json"));
         settings.Save(new());
         var viewModel = new TranslationAgentViewModel(settings);
-        var dialog = new TranslationAgentWindow(viewModel);
+        var dialog = new AIUpdater.Views.Settings.TranslationSettingsCard { DataContext = viewModel };
         var root = (FrameworkElement)dialog.Content;
         Render(root, Path.Combine(output, "translation-settings.png"), 660, 580);
         var agents = (ComboBox)dialog.FindName("TranslationAgentComboBox");
@@ -669,7 +672,7 @@ file static class Program
         Await(viewModel.DetectCommand.ExecuteAsync(null));
         Check(viewModel.DetectedPath == fakeCli && viewModel.Status.Contains("9.8.7") && editor.Text == "custom-codex-model", "CLI detection lost its path, version or manually entered model");
         editor.Text = "discarded-model";
-        dialog.Close();
+        viewModel.ResetCommand.Execute(null);
         Check(viewModel.Model == "custom-codex-model" && settings.Current.Profile.Model == "custom-codex-model", "Cancel did not restore saved settings");
         Console.WriteLine("PASS: translation settings input, profile drafts, effort labels, save, cancel, minimum layout");
     }
@@ -718,13 +721,25 @@ file static class Program
         Directory.CreateDirectory(output);
         TranslationAgentSettings.Default = new(Path.Combine(output, "translation-settings.json"));
         TranslationAgentSettings.Default.Save(TranslationAgentSettings.Default.Current with { Automatic = false });
-        var app = new App();
-        app.InitializeComponent();
-        AIUpdater.Infrastructure.AppTheme.Initialize();
+        KeepShell.Testing.PackScheme.Ensure();
+        var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new("pack://application:,,,/AIUpdater;component/Bootstrap/Resources.xaml") });
+        KeepShell.Bootstrap.ISettingsStore settings = new KeepShell.Testing.MemorySettings();
+        settings.SetValue(AIUpdater.Bootstrap.SettingsKeys.TranslationSelection, System.Text.Json.JsonSerializer.Serialize(new TranslationAgentSelection { Automatic = false }));
+        AIUpdater.Bootstrap.AppThemes.Initialize(settings);
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
-        var window = new MainWindow();
-        var viewModel = window.ViewModel;
-        Check(ReferenceEquals(window.DataContext, viewModel), "MainWindow DataContext is not MainViewModel");
+        CheckBindingSensor();
+        using var bindingErrors = KeepShell.Bootstrap.BindingErrorSink.Attach();
+        using var logging = KeepShell.Bootstrap.KeepShellLogging.Bootstrap(new() { LogsDirectory = Path.Combine(output, "diagnostics"), WriteToDebug = false });
+        using var provider = App.ConfigureServices(settings, logging, new(output, AppContext.BaseDirectory),
+            services => services.AddSingleton<IChangelogContentFetcher>(new StubChangelogContentFetcher(new Dictionary<string, string>())));
+        var window = provider.GetRequiredService<MainWindow>();
+        var shell = window.ViewModel;
+        var viewModel = shell.Updates;
+        using var visualHost = KeepShell.Testing.VisualTestHost.Show(window, 1200, 800);
+        visualHost.Settle();
+        var updatesView = Descendants<UpdatesView>(window).Single();
+        Check(ReferenceEquals(window.DataContext, shell), "MainWindow DataContext is not ShellViewModel");
         viewModel.ConfigurePaths(resultsPath: Path.Combine(output, "results.json"));
         foreach (var item in viewModel.Stages)
         {
@@ -755,7 +770,7 @@ file static class Program
         viewModel.IsRunning = false;
         var summary = MainViewModel.CheckSummary([stage]);
         Check(summary == "Доступно обновлений: 1", "Summary retained zero counters");
-        var updateButton = (Button)window.FindName("UpdateButton");
+        var updateButton = (Button)updatesView.FindName("UpdateButton");
         Check(updateButton.IsEnabled && updateButton.Content.ToString()!.EndsWith("(1)"), "Selection count did not refresh");
         Await(viewModel.SelectOrCheckStageAsync(viewModel.Stages[3]));
         Check(viewModel.Stages[3].IsSelectedForUpdate && updateButton.Content.ToString()!.EndsWith("(2)"), "Direct card click did not join the bulk selection");
@@ -779,7 +794,7 @@ file static class Program
         Check(viewModel.Stages[6].Status == "Не установлено" && !viewModel.Stages[6].CanUpdate, "Absent package still permits Update");
         var errorSummary = MainViewModel.CheckSummary([npmStage, viewModel.Stages[6]]);
         Check(errorSummary == "Ошибок проверки: 1 · Не установлено: 1", "Summary mixed absence and check failures");
-        Check(!((TextBox)window.FindName("LogTextBox")).Text.Contains("UI_RESULT"), "Protocol leaked into the visible journal");
+        Check(!viewModel.LogPanel.GeneralLogText.Contains("UI_RESULT"), "Protocol leaked into the visible journal");
         var warningRun = viewModel.CreateVendorRun("Anthropic", stage);
         stage.SetRunning(OperationState.Updating);
         warningRun.ActiveStage = stage;
@@ -807,79 +822,8 @@ file static class Program
             viewModel.RefreshVendorSummary(vendor);
         }
 
-        var root = (FrameworkElement)window.Content;
-        foreach (var (width, height) in new[] { (1072, 740), (932, 620) })
-        {
-            root.Measure(new(width, height));
-            root.Arrange(new(0, 0, width, height));
-            root.UpdateLayout();
-            var tabs = (FrameworkElement)window.FindName("LogTabs");
-            Check(tabs.TranslatePoint(new(0, tabs.ActualHeight), root).Y <= root.ActualHeight,
-                $"Journal extends below the window: {width}x{height}, bottom={tabs.TranslatePoint(new(0, tabs.ActualHeight), root).Y}, available={root.ActualHeight}");
-
-            var splitter = (GridSplitter)window.FindName("LogSplitter");
-            Check(splitter.ActualHeight >= 8, "GridSplitter between cards and journal collapsed");
-            var mainLogBox = (TextBox)window.FindName("LogTextBox");
-            Check(mainLogBox.ActualHeight >= 60, $"Main log viewport is too small ({mainLogBox.ActualHeight}px) at {width}x{height}");
-            var tabControl = (TabControl)window.FindName("LogTabs");
-            tabControl.SelectedIndex = 1;
-            root.UpdateLayout();
-            Check(ReferenceEquals(viewModel.LogPanel.SelectedVendor, viewModel.Vendors[0]), "Selecting vendor log tab did not update LogPanelViewModel.SelectedVendor");
-            var vendorLogBox = Descendants<TextBox>(tabControl).First(box => box != mainLogBox);
-            Check(vendorLogBox.ActualHeight >= 55, $"Vendor log viewport is too small ({vendorLogBox.ActualHeight}px) at {width}x{height}");
-            tabControl.SelectedIndex = 0;
-            root.UpdateLayout();
-            Check(viewModel.LogPanel.SelectedVendor is null, "Selecting general log tab did not clear LogPanelViewModel.SelectedVendor");
-
-            Check(Descendants<StageCardView>(root).Count() == viewModel.Stages.Count, "MainWindow did not materialize StageCardView for every stage");
-            Check(Descendants<LogPanelView>(root).Count() == 1, "MainWindow did not materialize LogPanelView");
-            var logPanelView = Descendants<LogPanelView>(root).Single();
-            logPanelView.RegisterNames(window);
-            var firstMenuButton = Descendants<Button>(root).First(button => Equals(button.Content, "⋮"));
-            var firstCardBorder = Descendants<Border>(root).First(border => border.ContextMenu is not null);
-            firstMenuButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-            var cardMenu = firstCardBorder.ContextMenu!;
-            Check(ReferenceEquals(cardMenu.PlacementTarget, firstCardBorder) && cardMenu.DataContext is StageCardViewModel,
-                "StageCardView menu button did not bind ContextMenu PlacementTarget to StageCardViewModel");
-            Check(cardMenu.Items.OfType<MenuItem>().Count() == 5 && cardMenu.Items.OfType<MenuItem>().All(item => item.Command is not null),
-                "StageCardView ContextMenu items are missing bound commands");
-            cardMenu.IsOpen = false;
-            Check(Descendants<Button>(root).Count(button => Equals(button.Content, "⋮")) == viewModel.Stages.Count, "Missing visible card menus");
-            Check(Descendants<Border>(root).Count(border => border.ContextMenu is not null) == viewModel.Stages.Count, "Card context menus missing");
-            var directChoices = Descendants<CheckBox>(root).Where(box => box.DataContext is UpdateStage { PackageStatus: PackageStatus.DirectUpdate }).ToArray();
-            Check(directChoices.Length == 2 && directChoices.All(box => box.Visibility == Visibility.Visible && box.IsChecked == false), "Direct-update checkboxes are hidden or checked by default");
-            var cards = Descendants<Border>(root).Where(border => border.ContextMenu is not null).ToArray();
-            Check(cards.Length == 17 && cards.Max(card => card.ActualWidth) - cards.Min(card => card.ActualWidth) < 1, "Vendor card grid widths differ");
-            foreach (var row in Descendants<StageCardView>(root).GroupBy(card => Math.Round(card.TranslatePoint(new(0, 0), root).Y)))
-            {
-                var positions = row.Select(card => ((TextBlock)card.FindName("StageTitle")).TranslatePoint(new(0, 0), root).Y).ToArray();
-                Check(positions.Max() - positions.Min() < 1, "Card titles are not aligned");
-            }
-
-            var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-            bitmap.Render(root);
-            var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(bitmap));
-            using var file = File.Create(Path.Combine(output, $"interface-{width}.png"));
-            encoder.Save(file);
-            var stopButton = (Button)window.FindName("StopButton");
-            stopButton.Visibility = Visibility.Visible;
-            root.Measure(new(width, height));
-            root.Arrange(new(0, 0, width, height));
-            root.UpdateLayout();
-            Check(tabs.TranslatePoint(new(0, tabs.ActualHeight), root).Y <= root.ActualHeight, "Busy layout extends below the window");
-            stopButton.Visibility = Visibility.Collapsed;
-        }
-
-        Check(((Button)window.FindName("StopButton")).Visibility == Visibility.Collapsed, "Idle stop button is visible");
-        var logZoomIn = (Button)window.FindName("LogZoomInButton");
-        var logZoomOut = (Button)window.FindName("LogZoomOutButton");
-        var initialLogSize = ((TextBox)window.FindName("LogTextBox")).FontSize;
-        Click(logZoomIn);
-        Check(Math.Abs(((TextBox)window.FindName("LogTextBox")).FontSize - (initialLogSize + 1)) < 0.01, "Log zoom in did not increase font size");
-        Click(logZoomOut);
-        Check(Math.Abs(((TextBox)window.FindName("LogTextBox")).FontSize - initialLogSize) < 0.01, "Log zoom out did not restore font size");
-        CheckChangelog(output, viewModel.Stages);
+        CheckShellWindow(visualHost, window, shell, output);
+        CheckChangelog(output, viewModel.Stages, provider);
         CheckTranslationAgentSettings(output);
         CheckAgentTranslation(output);
         var fixture = Path.Combine(output, "fixture.ps1");
@@ -942,13 +886,13 @@ file static class Program
         File.Delete(Path.Combine(output, "missing"));
         File.WriteAllText(Path.Combine(output, "wait"), "");
         var stopped = viewModel.RunUpdaterAsync(null, "Update", false, [stage, other]);
-        Click((Button)window.FindName("StopButton"));
+        CheckOperationNavigation(visualHost, window, shell);
         Await(stopped);
         Check(stage.OperationState == OperationState.Stopped && other.OperationState == OperationState.Stopped, "Stop did not finish running/queued cards");
         File.Delete(Path.Combine(output, "wait"));
         File.WriteAllText(Path.Combine(output, "error-result"), "");
         Await(viewModel.RunUpdaterAsync(stage, "Update", true));
-        Check(stage.Status == "Ошибка проверки" && ((TextBlock)window.FindName("OverallStatusText")).Text.Contains("Ошибок проверки: 1"), "Check completion overwrote its failure result");
+        Check(stage.Status == "Ошибка проверки" && viewModel.OverallStatusText.Contains("Ошибок проверки: 1"), "Check completion overwrote its failure result");
         File.Delete(Path.Combine(output, "error-result"));
         Console.WriteLine("PASS: independent states, selection, chunked JSON, vendor guard, malformed payload, persistence, two WPF widths, selected dispatch, post-update check, failure isolation, stop running/queued cards");
         var darkOutput = Path.Combine(Path.GetDirectoryName(output)!, "dark-controls");
@@ -957,6 +901,10 @@ file static class Program
         Console.WriteLine("PASS: application control templates, checkbox states and accessible toggle, text menu, changelog layout, themed confirmation with safe default");
         CheckIcon(darkOutput);
         Console.WriteLine("PASS: packaged ICO sizes, transparency and nonempty frames");
+        visualHost.Settle();
+        File.WriteAllText(Path.Combine(output, "binding-errors.txt"), bindingErrors.Report);
+        Check(bindingErrors.Count == 0, $"WPF binding errors: {bindingErrors.Report}");
+        Console.WriteLine("PASS: binding sensor self-test and zero binding errors in the shared application graph");
     }
 
     private sealed class StubChangelogContentFetcher(IReadOnlyDictionary<string, string> responses) : IChangelogContentFetcher

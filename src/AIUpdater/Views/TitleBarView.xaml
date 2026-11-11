@@ -1,0 +1,38 @@
+﻿<UserControl x:Class="AIUpdater.Views.TitleBarView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+             xmlns:keepshell="https://schemas.keepshell.dev/wpf"
+             xmlns:icons="http://metro.mahapps.com/winfx/xaml/iconpacks">
+    <Border Background="{DynamicResource Bg.Surface}" BorderBrush="{DynamicResource Border.Subtle}" BorderThickness="0,0,0,1" keepshell:TitleBarBehavior.IsWindowChrome="True">
+        <Grid Height="38">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0">
+                <Image Source="/AIUpdater;component/Assets/AIUpdater.png" Width="24" Height="24" Margin="0,0,9,0" />
+                <TextBlock Text="AI Updater" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding AppVersion}" Foreground="{DynamicResource Fg.Muted}" VerticalAlignment="Center" Margin="10,0,0,0" FontSize="{DynamicResource Font.Size.XS}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button Command="{Binding CurrentPageRefresh.RefreshCommand}" ToolTip="{Binding CurrentPageRefresh.RefreshTooltip}" AutomationProperties.Name="Обновить страницу">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource Chrome.Button}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CurrentPageRefresh}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                    <icons:PackIconLucide Kind="{x:Static icons:PackIconLucideKind.RefreshCw}" Width="14" Height="14" />
+                </Button>
+                <Button Style="{DynamicResource Chrome.Button}" Click="Minimize_Click" ToolTip="Свернуть" AutomationProperties.Name="Свернуть окно">
+                    <icons:PackIconLucide Kind="{x:Static icons:PackIconLucideKind.Minus}" Width="14" Height="14" />
+                </Button>
+                <Button Style="{DynamicResource Chrome.Button.MaxRestore}" Click="Maximize_Click" ToolTip="Развернуть или восстановить" AutomationProperties.Name="Развернуть окно">
+                    <icons:PackIconLucide Kind="{x:Static icons:PackIconLucideKind.Square}" Width="12" Height="12" />
+                </Button>
+                <Button Style="{DynamicResource Chrome.Button.Close}" Click="Close_Click" ToolTip="Закрыть" AutomationProperties.Name="Закрыть окно">
+                    <icons:PackIconLucide Kind="{x:Static icons:PackIconLucideKind.X}" Width="15" Height="15" />
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

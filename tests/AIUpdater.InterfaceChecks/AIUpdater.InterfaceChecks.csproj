@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="KeepShell.Testing" Version="0.1.260" />
     <ProjectReference Include="../../src/AIUpdater/AIUpdater.csproj" />
   </ItemGroup>
 </Project>

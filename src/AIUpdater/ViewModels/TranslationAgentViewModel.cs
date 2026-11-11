@@ -27,6 +27,7 @@ public sealed class TranslationAgentViewModel : ObservableObject
             finally { (backend as IDisposable)?.Dispose(); }
         }).ToArray();
         SaveCommand = new RelayCommand(Save);
+        ResetCommand = new RelayCommand(Reset);
         DetectCommand = new AsyncRelayCommand(DetectAsync);
         Reset();
     }
@@ -70,6 +71,7 @@ public sealed class TranslationAgentViewModel : ObservableObject
     public bool HasModels => Models.Count > 0;
     public IReadOnlyList<AgentEffortOption> Efforts { get; private set => SetProperty(ref field, value); } = [];
     public IRelayCommand SaveCommand { get; }
+    public IRelayCommand ResetCommand { get; }
     public IAsyncRelayCommand DetectCommand { get; }
     public event Action? Saved;
 
@@ -127,7 +129,7 @@ public sealed class TranslationAgentViewModel : ObservableObject
             StoreProfile();
             _settings.Save(new() { Automatic = Automatic, BackendId = BackendId, Profiles = new(_profiles) });
             OnPropertyChanged(nameof(SavedDescription));
-            Status = "Настройки сохранены";
+            Status = "Настройки применены";
             Saved?.Invoke();
         }
         catch (Exception exception) when (exception is System.IO.IOException or UnauthorizedAccessException or ArgumentException) { Status = exception.Message; }

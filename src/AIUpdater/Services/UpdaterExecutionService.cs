@@ -15,16 +15,15 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
     public UpdaterExecutionService(
         IStageResultStore resultStore,
         IUpdaterProcessRunner processRunner,
-        UpdaterOutputParser outputParser)
+        UpdaterOutputParser outputParser,
+        AIUpdater.Bootstrap.AppPaths? paths = null)
     {
         _resultStore = resultStore;
         _processRunner = processRunner;
         _outputParser = outputParser;
 
-        LogDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "AIUpdater",
-            "Logs");
+        paths ??= AIUpdater.Bootstrap.AppPaths.Default;
+        LogDirectory = paths.LogsDirectory;
         try
         {
             Directory.CreateDirectory(LogDirectory);
@@ -33,7 +32,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
         {
         }
 
-        ScriptPath = Path.Combine(AppContext.BaseDirectory, "Update-Codex.ps1");
+        ScriptPath = Path.Combine(paths.ScriptDirectory, "Update-Codex.ps1");
         LogPath = Path.Combine(LogDirectory, "Update-Codex-last.log");
         _resultStore.ResultsPath = Path.Combine(LogDirectory, "LastResults.json");
     }

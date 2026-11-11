@@ -74,7 +74,7 @@
                     AutomationProperties.Name="{Binding CardActionName}" />
                 <StackPanel VerticalAlignment="Top" IsHitTestVisible="False" Margin="2">
                     <TextBlock x:Name="StageTitle" Text="{Binding Name}"
-                               FontSize="12"
+                               FontSize="{DynamicResource Font.Size.S}"
                                FontWeight="SemiBold"
                                TextWrapping="NoWrap"
                                TextTrimming="CharacterEllipsis"
@@ -91,11 +91,11 @@
                         <TextBlock Grid.Column="1"
                                    Text="{Binding Status}"
                                    Foreground="{Binding StatusBrush}"
-                                   FontSize="11"
+                                   FontSize="{DynamicResource Font.Size.XS}"
                                    TextTrimming="CharacterEllipsis"
                                    ToolTip="{Binding Status}" />
                     </Grid>
-                    <TextBlock FontSize="11"
+                    <TextBlock FontSize="{DynamicResource Font.Size.XS}"
                                Margin="0,3,0,0"
                                TextWrapping="Wrap">
                         <Run Text="{Binding VersionPrefixText, Mode=OneWay}"

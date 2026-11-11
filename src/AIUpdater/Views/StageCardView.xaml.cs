@@ -3,7 +3,7 @@ using System.Windows.Controls;
 
 namespace AIUpdater.Views;
 
-public partial class StageCardView : UserControl
+public partial class StageCardView : UserControl, KeepShell.Bootstrap.IView<AIUpdater.ViewModels.StageCardViewModel>
 {
     public StageCardView()
     {
