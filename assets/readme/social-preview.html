@@ -1,0 +1,37 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>AIUpdater, обложка репозитория</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: #0b1411; font-family: "Segoe UI", Arial, sans-serif; }
+    main { position: relative; overflow: hidden; width: 1280px; height: 640px; padding: 64px 72px; color: #edf7f1; background: radial-gradient(ellipse at 100% 0%, #153f2b 0%, transparent 60%), #0b1411; border: 1px solid #365844; display: flex; flex-direction: column; justify-content: space-between; }
+    main::after { content: ""; position: absolute; right: -120px; top: 180px; width: 470px; height: 470px; border: 1px solid #365844; border-radius: 50%; box-shadow: 0 0 0 48px #6ee7b708, 0 0 0 96px #6ee7b705; pointer-events: none; }
+    header { display: flex; align-items: center; gap: 24px; }
+    header img { width: 80px; height: 80px; }
+    .brand { font-size: 76px; line-height: 1; font-weight: 650; letter-spacing: -3px; }
+    .platform { margin-left: auto; color: #6ee7b7; font-size: 20px; border: 1px solid #365844; border-radius: 24px; padding: 9px 20px; }
+    h1 { position: relative; z-index: 1; margin: 36px 0 20px; font-size: 44px; line-height: 1.3; font-weight: 500; letter-spacing: -.8px; }
+    .features { color: #6ee7b7; font-size: 23px; line-height: 1.6; }
+    footer { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 12px; margin-top: 38px; }
+    footer span { padding: 11px 18px; border-radius: 9px; border: 1px solid #365844; background: #121f1a; color: #cce4d6; font-size: 20px; }
+  </style>
+</head>
+<body>
+  <main aria-label="Обложка AIUpdater">
+    <header>
+      <img src="../../src/AIUpdater/Assets/AIUpdater.png" alt="">
+      <div class="brand">AIUpdater</div>
+      <div class="platform">Windows · .NET · WPF</div>
+    </header>
+    <section>
+      <h1>AI-инструменты и окружение разработки<br>в одном окне</h1>
+      <div class="features">17 компонентов · История релизов · Перевод через CLI</div>
+    </section>
+    <footer aria-label="Поддерживаемые группы">
+      <span>OpenAI</span><span>Anthropic</span><span>Google</span><span>DeepSeek</span><span>Инструменты разработки</span>
+    </footer>
+  </main>
+</body>
+</html>
