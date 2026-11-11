@@ -41,12 +41,14 @@ public sealed class ChangelogRelease
     public string? TranslatedTitle { get; set; }
     public string? TranslatedSummary { get; set; }
     public List<ChangelogGroup>? TranslatedGroups { get; set; }
+    public TranslationProvenance? Translation { get; set; }
+    public bool IsTranslationStale => Translation is not null && Translation.SourceHash != TranslationProvenance.Hash(this);
     public bool HasTranslation => TranslatedGroups is { Count: > 0 };
 }
 
 public sealed class ChangelogDocument
 {
-    public const int CurrentSchemaVersion = 7;
+    public const int CurrentSchemaVersion = 8;
 
     public int SchemaVersion { get; set; }
     public string StageId { get; set; } = "";

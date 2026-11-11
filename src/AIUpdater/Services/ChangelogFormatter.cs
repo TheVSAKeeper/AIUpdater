@@ -205,14 +205,14 @@ public sealed class ChangelogPresentationState : IDisposable
             var visibleReleases = ChangelogFormatter.FilterReleasesByChannel(document.Releases, SelectedChannel);
             var latestToTranslate = visibleReleases
                 .Take(2)
-                .FirstOrDefault(release => !release.HasTranslation && !ChangelogFormatter.IsPrimarilyRussian(release));
+                .FirstOrDefault(release => (!release.HasTranslation || release.IsTranslationStale) && !ChangelogFormatter.IsPrimarilyRussian(release));
             var statusPrefix = fromCacheOnly
                 ? $"Из кэша ({document.UpdatedAt.ToLocalTime():dd.MM.yyyy HH:mm}, выпусков: {visibleReleases.Count})"
                 : $"Загружено выпусков: {visibleReleases.Count}";
 
-            if (latestToTranslate is not null)
+            if (service.Translator.Settings.Current.Automatic && latestToTranslate is not null)
             {
-                onStatus(statusPrefix + " · Обработка свежего выпуска через Antigravity Flash…");
+                onStatus(statusPrefix + $" · Обработка свежего выпуска через {service.Translator.DisplayName}…");
                 await TranslateReleaseAsync(service, document, latestToTranslate, stage, false, statusPrefix, onRender, onStatus, onTranslated, token);
             }
             else
@@ -297,11 +297,11 @@ public sealed class ChangelogPresentationState : IDisposable
                 OriginalOverrideReleaseKeys.Remove(key);
                 onTranslated();
                 onRender(document, stage);
-                onStatus($"{statusPrefix} · Выпуск «{_translatingReleaseTitle}» обработан (Flash)");
+                onStatus($"{statusPrefix} · Выпуск «{_translatingReleaseTitle}» обработан ({service.Translator.DisplayName})");
                 return true;
             }
 
-            TranslationErrors[key] = "Не удалось обработать релиз через Antigravity CLI (agy). Проверьте доступность agy и повторите попытку.";
+            TranslationErrors[key] = "Не удалось обработать релиз выбранным агентом. Проверьте CLI и повторите попытку.";
             onRender(document, stage);
             onStatus($"{statusPrefix} · Не удалось обработать выпуск");
             return false;
@@ -543,7 +543,8 @@ public static class ChangelogFormatter
 
         if (release.HasTranslation && showRuForCard)
         {
-            badges.Add(new("Обработано ИИ", "Translated", badgeFontSize));
+            badges.Add(new(release.Translation is { } provenance ? $"{provenance.BackendId} / {provenance.RequestedModel}" : "Обработано ИИ", "Translated", badgeFontSize));
+            if (release.IsTranslationStale) badges.Add(new("Исходник изменился", "Prerelease", badgeFontSize));
         }
 
         return badges;
@@ -552,7 +553,7 @@ public static class ChangelogFormatter
     public static string BuildTranslationProgressText(int groupCount, int itemCount, DateTimeOffset startedAt)
     {
         var elapsed = Math.Max(0, (int)(DateTimeOffset.UtcNow - startedAt).TotalSeconds);
-        return $"Обработка через Antigravity Flash ({elapsed} сек) · разделов: {groupCount}, пунктов: {itemCount} · генерация резюме и перевода…";
+        return $"Обработка релиза ({elapsed} сек) · разделов: {groupCount}, пунктов: {itemCount} · генерация резюме и перевода…";
     }
 
     public static string BuildGroupSummary(ChangelogGroup group)

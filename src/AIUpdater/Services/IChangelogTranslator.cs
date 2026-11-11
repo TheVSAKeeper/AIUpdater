@@ -4,7 +4,9 @@ namespace AIUpdater.Services;
 
 public interface IChangelogTranslator
 {
-    Func<string, CancellationToken, Task<string?>>? PromptRunner { get; set; }
+    TranslationAgentSettings Settings { get; }
+
+    string DisplayName { get; }
 
     Task<bool> TranslateReleaseAsync(
         ChangelogRelease release,

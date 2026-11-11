@@ -33,6 +33,8 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
     {
         _changelogService = changelogService ?? new ChangelogService();
         _dialogService = dialogService;
+        AgentSettings = new(_changelogService.Translator.Settings);
+        _changelogService.Translator.Settings.Changed += OnAgentChanged;
         _allStages = stages.ToArray();
         _state = new ChangelogPresentationState(UpdateTranslationBannerLiveText);
 
@@ -57,6 +59,8 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
         SelectedStage = selected ?? _allStages.FirstOrDefault();
     }
 
+    public TranslationAgentViewModel AgentSettings { get; }
+    private void OnAgentChanged() { _state.CancelTranslation(); if (_state.CurrentStage is { } stage) UpdateSourceHeader(stage); }
     public event Action? ScrollToHomeRequested;
     public ICollectionView? StagesView { get; }
     public bool HasStages => _allStages.Length > 0;
@@ -289,7 +293,7 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
         }
     }
 
-    public void Dispose() => _state.Dispose();
+    public void Dispose() { _changelogService.Translator.Settings.Changed -= OnAgentChanged; _state.Dispose(); }
 
     private void ToggleChannel() =>
         SetSelectedChannel(SelectedChannel == ReleaseChannel.Prerelease ? ReleaseChannel.Stable : ReleaseChannel.Prerelease);
@@ -358,7 +362,7 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable
         var source = stage.GetChangelogSource();
         SourceNote = source.Note;
         SourcePageUrl = source.PageUrl;
-        SourceInfoToolTip = $"{source.Note}\n\nЖурнал кэшируется на диске; кнопка «Обработать этот релиз» на карточке формирует краткое резюме и русский перевод через Antigravity Flash.";
+        SourceInfoToolTip = $"{source.Note}\n\nЖурнал кэшируется на диске; кнопка «Обработать этот релиз» на карточке формирует краткое резюме и русский перевод через выбранного агента {_changelogService.Translator.DisplayName}.";
         SourceButtonToolTip = string.IsNullOrWhiteSpace(source.PageUrl)
             ? source.Note
             : $"{source.Note}\n{source.PageUrl}";

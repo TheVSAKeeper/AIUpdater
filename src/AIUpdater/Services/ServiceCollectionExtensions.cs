@@ -21,7 +21,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IChangelogRepository, FileChangelogRepository>();
         services.AddSingleton<IChangelogContentFetcher, ChangelogContentFetcher>();
-        services.AddSingleton<IChangelogTranslator, AgyChangelogTranslator>();
+        services.AddSingleton<IChangelogTranslator, AgentChangelogTranslator>();
         services.AddSingleton<IChangelogService, ChangelogService>();
 
         services.AddSingleton<IStageResultStore, FileStageResultStore>();

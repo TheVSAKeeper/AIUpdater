@@ -138,6 +138,9 @@ file static class Program
         ((TextBox)changelog.FindName("ChangelogTextBox")).Text = "Пример содержимого окна «Что нового».\nПроверка тёмных рамок, списка, выделения и полосы прокрутки.";
         Render((FrameworkElement)changelog.Content, Path.Combine(output, "changelog.png"), 920, 600);
         Check(Descendants<ListBoxItem>(list).All(item => item.Template is not null), "Changelog rows lost their template");
+        ((Expander)changelog.FindName("TranslationAgentExpander")).IsExpanded = true;
+        Render((FrameworkElement)changelog.Content, Path.Combine(output, "changelog-agent-settings.png"), 1120, 740);
+        Check(((ComboBox)changelog.FindName("TranslationAgentComboBox")).Items.Count == 4, "Agent settings did not expose four CLI backends");
         changelog.Close();
         var dialog = AppDialog.Create(null, "Удалить выбранный компонент?", "Удаление компонента", true);
         ((Grid)dialog.Content).Background = dialog.Background;
@@ -190,10 +193,10 @@ file static class Program
         using var resolvedChangelogVm = provider.GetRequiredService<ChangelogViewModel>();
         Check(resolvedMainVm.Stages.Count == 17 && resolvedChangelogVm.HasStages, "DI container did not resolve MainViewModel and ChangelogViewModel");
 
-        var cacheDir = Path.Combine(output, "changelog-cache");
+        var cacheDir = Path.Combine(output, "changelog-cache-" + Guid.NewGuid().ToString("N"));
         var repository = new FileChangelogRepository(cacheDir);
         var fetcher = provider.GetRequiredService<IChangelogContentFetcher>();
-        var translator = new AgyChangelogTranslator(fetcher);
+        var translator = new AgentChangelogTranslator();
         var changelogService = new ChangelogService(fetcher, parsers, repository, translator);
 
         foreach (var item in stages)
@@ -397,7 +400,7 @@ file static class Program
               && loadedDoc.Releases[0].TranslatedGroups!.Count == 2
               && !string.IsNullOrWhiteSpace(loadedDoc.Releases[0].TranslatedSummary)
               && loadedDoc.Releases[0].TranslatedGroups!.All(g => !string.IsNullOrWhiteSpace(g.Summary)),
-            "Flash translation did not populate translated groups or summaries on the target release");
+            "Agent translation did not populate translated groups or summaries on the target release");
         var reloadedAfterTranslation = changelogService.TryLoadCachedDocument("Antigravity CLI");
         Check(reloadedAfterTranslation is not null && reloadedAfterTranslation.Releases[0].HasTranslation && !reloadedAfterTranslation.Releases[1].HasTranslation,
             "Translated release was not persisted to disk cache");
@@ -528,7 +531,7 @@ file static class Program
                 ]
                 """,
         });
-        var stubService = new ChangelogService(stubFetcher, parsers, new FileChangelogRepository(Path.Combine(output, "stub-cache")), new AgyChangelogTranslator(stubFetcher));
+        var stubService = new ChangelogService(stubFetcher, parsers, new FileChangelogRepository(Path.Combine(output, "stub-cache")), new AgentChangelogTranslator());
 
         var isolatedStages = UpdateStage.CreateCatalog();
         var codexCliStage = isolatedStages.First(s => s.Id == "Active Codex CLI");
@@ -592,11 +595,50 @@ file static class Program
         return task.GetAwaiter().GetResult();
     }
 
+    private static void CheckAgentTranslation(string output)
+    {
+        var settings = new TranslationAgentSettings(Path.Combine(output, "agent-profiles.json"));
+        settings.Save(new() { Automatic = false, BackendId = "claude-code", Profiles = new() { ["claude-code"] = new() { Model = "test-model" } } });
+        var translator = new AgentChangelogTranslator(settings);
+        var release = new ChangelogRelease { Version = "1", Title = "Original", Groups = [new() { Category = ChangeCategory.Fixed, Items = ["Fixed startup"] }] };
+        const string valid = "[Summary]\nИсправлен запуск.\n[Fixed]\nSummary: Исправлен запуск.\n- Исправлен запуск";
+        translator.PromptRunner = (_, _) => Task.FromResult<string?>(valid);
+        Check(AwaitResult(translator.TranslateReleaseAsync(release, CancellationToken.None)), "Selected backend translation failed");
+        Check(release.Translation?.BackendId == "claude-code" && release.Translation.RequestedModel == "test-model", "Translation provenance missing");
+        var manyItems = new ChangelogRelease { Version = "large", Groups = [new() { Category = ChangeCategory.Fixed, Items = Enumerable.Range(0, 300).Select(index => index + new string('x', 200)).ToList() }] };
+        var calls = 0;
+        translator.PromptRunner = (prompt, _) => { calls++; Check(prompt.Length < 45_000, "Release was not split into bounded requests"); return Task.FromResult<string?>(valid); };
+        Check(AwaitResult(translator.TranslateReleaseAsync(manyItems, CancellationToken.None)) && calls == 3, "Large release was not translated in chunks plus combined summary");
+        translator.PromptRunner = (_, _) => Task.FromResult<string?>("diagnostics without translation sections");
+        Check(!AwaitResult(translator.TranslateReleaseAsync(release, CancellationToken.None, true)), "Malformed translation was accepted");
+        var previous = release.TranslatedGroups;
+        translator.PromptRunner = (_, _) => Task.FromResult<string?>(null);
+        Check(!AwaitResult(translator.TranslateReleaseAsync(release, CancellationToken.None, true)) && ReferenceEquals(previous, release.TranslatedGroups), "Failed retry erased translation");
+        var pending = new TaskCompletionSource<string?>();
+        translator.PromptRunner = (_, _) => pending.Task;
+        var late = translator.TranslateReleaseAsync(release, CancellationToken.None, true);
+        settings.Save(settings.Current with { BackendId = "opencode" });
+        pending.SetResult(valid.Replace("Исправлен", "Изменён"));
+        Check(!AwaitResult(late) && ReferenceEquals(previous, release.TranslatedGroups), "Old backend response was applied after selection changed");
+        var loaded = new TranslationAgentSettings(settings.FilePath);
+        Check(loaded.Current.BackendId == "opencode" && loaded.Current.Profiles["claude-code"].Model == "test-model", "Per-backend settings did not persist");
+        release.Groups[0].Items.Add("Fixed another issue");
+        Check(release.IsTranslationStale, "Changed source did not invalidate translation provenance");
+        var repository = new FileChangelogRepository(Path.Combine(output, "agent-cache"));
+        var document = new ChangelogDocument { StageId = "test", Releases = [release] };
+        repository.Save(document);
+        var cacheFile = Directory.GetFiles(repository.CacheDirectory, "*.json").Single();
+        File.WriteAllText(cacheFile, File.ReadAllText(cacheFile).Replace("\"SchemaVersion\": 8", "\"SchemaVersion\": 7"));
+        Check(repository.TryLoad("test")?.Releases[0].HasTranslation == true, "Version 7 cache migration lost translation");
+        Console.WriteLine("PASS: agent selection, settings persistence, provenance, stale source, failed retry, late response, cache v7");
+    }
     [STAThread]
     private static void Main(string[] args)
     {
         var output = Path.GetFullPath(args[0]);
         Directory.CreateDirectory(output);
+        TranslationAgentSettings.Default = new(Path.Combine(output, "translation-settings.json"));
+        TranslationAgentSettings.Default.Save(TranslationAgentSettings.Default.Current with { Automatic = false });
         var app = new App();
         app.InitializeComponent();
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
@@ -758,6 +800,7 @@ file static class Program
         Click(logZoomOut);
         Check(Math.Abs(((TextBox)window.FindName("LogTextBox")).FontSize - initialLogSize) < 0.01, "Log zoom out did not restore font size");
         CheckChangelog(output, viewModel.Stages);
+        CheckAgentTranslation(output);
         var fixture = Path.Combine(output, "fixture.ps1");
         var calls = Path.Combine(output, "calls.txt");
         File.WriteAllText(calls, "");

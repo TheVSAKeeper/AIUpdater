@@ -22,7 +22,7 @@ public sealed class ChangelogService(
             new ChangelogContentFetcher(),
             CreateDefaultParsers(),
             new FileChangelogRepository(),
-            new AgyChangelogTranslator())
+            new AgentChangelogTranslator())
     {
     }
 
