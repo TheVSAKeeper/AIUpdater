@@ -15,6 +15,10 @@ function Invoke-CommandCapture
     param($FilePath, $Arguments, [switch]$NoLogCommand)
     if ($FilePath -ne 'winget') { throw "Unexpected tool: $FilePath" }
     $script:commands.Add(@($Arguments))
+    if ($Arguments[0] -eq 'list' -and $Arguments[2] -eq 'Microsoft.WindowsTerminal')
+    {
+        return [pscustomobject]@{ ExitCode = $script:terminalCatalogCode; Text = $script:terminalCatalogResponse }
+    }
     return [pscustomobject]@{
         ExitCode = $(if ($Arguments[0] -eq 'list') { $script:listCode } else { $script:upgradeCode })
         Text = $script:response
@@ -28,6 +32,8 @@ function Read-Result
 }
 $script:hasWinget = $true
 $script:upgradeCode = 0
+$script:terminalCatalogCode = 0
+$script:terminalCatalogResponse = 'Windows Terminal Microsoft.WindowsTerminal 1.0.0'
 foreach ($entry in (Get-DevelopmentPackages).GetEnumerator())
 {
     if ($entry.Key -eq '.NET SDK 10') { continue }
@@ -48,9 +54,9 @@ foreach ($entry in (Get-DevelopmentPackages).GetEnumerator())
         $script:response = $case.Text
         Invoke-CheckStage $entry.Key
         $result = Read-Result
-        $expectedResult = if ($source -eq 'msstore' -and $case.Expected -eq 'CURRENT') { 'UNKNOWN' } else { $case.Expected }
-        if ($result.Result -ne $expectedResult) { throw "$( $entry.Key ): expected $expectedResult, got $( $result.Result )" }
-        if ($script:commands.Count -ne 1 -or $script:commands[0][0] -ne 'list') { throw 'Check attempted a mutation' }
+        if ($result.Result -ne $case.Expected) { throw "$( $entry.Key ): expected $( $case.Expected ), got $( $result.Result )" }
+        $expectedCommands = if ($entry.Key -eq 'Windows Terminal' -and $case.Expected -eq 'CURRENT') { 2 } else { 1 }
+        if ($script:commands.Count -ne $expectedCommands -or @($script:commands | Where-Object { $_[0] -ne 'list' }).Count) { throw 'Check attempted a mutation or used unexpected queries' }
         if ($result.Result -eq 'ERROR' -and -not $result.Info) { throw 'Error has no explanation' }
     }
     $script:listCode = 0
@@ -69,6 +75,42 @@ foreach ($entry in (Get-DevelopmentPackages).GetEnumerator())
     Update-DevelopmentTool $entry.Key
     if ($script:commands.Count -ne 1) { throw 'Absent application triggered an upgrade' }
 }
+$script:listCode = 0
+$script:response = 'Терминал Windows 9N0DX20HK701 1.25.2733.0'
+foreach ($case in @(
+    @{ Code = 0; Text = 'Терминал Windows Microsoft.WindowsTerminal 1.25.2733.0 1.25.3131.0'; Expected = 'AVAILABLE'; Available = '1.25.3131.0' },
+    @{ Code = 0; Text = 'Windows Terminal Microsoft.WindowsTerminal 1.25.2733.0'; Expected = 'CURRENT'; Available = '1.25.2733.0' },
+    @{ Code = 0; Text = 'Windows Terminal Microsoft.WindowsTerminal 1.25.2733.0 1.24.0.0'; Expected = 'CURRENT'; Available = '1.24.0.0' },
+    @{ Code = 123; Text = 'source failed'; Expected = 'ERROR'; Available = $null },
+    @{ Code = -1978335212; Text = ''; Expected = 'ERROR'; Available = $null },
+    @{ Code = 0; Text = 'Windows Terminal Microsoft.WindowsTerminal Unknown'; Expected = 'ERROR'; Available = $null },
+    @{ Code = 0; Text = 'Windows Terminal Microsoft.WindowsTerminal 1.24.0.0 1.25.3131.0'; Expected = 'ERROR'; Available = $null }
+))
+{
+    $script:messages.Clear()
+    $script:commands.Clear()
+    $script:terminalCatalogCode = $case.Code
+    $script:terminalCatalogResponse = $case.Text
+    Invoke-CheckStage 'Windows Terminal'
+    $result = Read-Result
+    if ($result.Result -ne $case.Expected -or $result.Installed -ne '1.25.2733.0' -or $result.Available -ne $case.Available -or -not $result.Info)
+    {
+        throw 'Terminal catalog comparison lost versions, status or source information'
+    }
+    $expected = @(
+        'list --id 9N0DX20HK701 --exact --source msstore --accept-source-agreements --disable-interactivity',
+        'list --id Microsoft.WindowsTerminal --exact --source winget --accept-source-agreements --disable-interactivity'
+    )
+    if ($script:commands.Count -ne 2 -or ($script:commands[0] -join ' ') -ne $expected[0] -or ($script:commands[1] -join ' ') -ne $expected[1])
+    {
+        throw 'Terminal comparison used an unexpected command or source'
+    }
+}
+$script:messages.Clear()
+$script:commands.Clear()
+Test-WingetUpdate 'Other Store app' '9N0DX20HK701' 'msstore'
+if ((Read-Result).Result -ne 'UNKNOWN' -or $script:commands.Count -ne 1) { throw 'Terminal fallback changed another Store package check' }
+Write-Host 'PASS: Terminal catalog fallback, versions, source failures, identity mismatch and Store upgrade source'
 $script:hasWinget = $false
 $script:messages.Clear()
 $script:commands.Clear()

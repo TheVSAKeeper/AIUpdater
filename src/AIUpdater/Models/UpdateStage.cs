@@ -144,6 +144,8 @@ public sealed class UpdateStage : ObservableObject
         ? $"v{AvailableVersion}"
         : "";
 
+    public string AvailableVersionDisplayText => AvailableVersion ?? (HasUpdate ? "Не сообщается" : "–");
+
     public Brush VersionBrush => PackageStatus == PackageStatus.UpToDate ? Brushes.MediumAquamarine : Brushes.LightSlateGray;
     public Brush VersionTargetBrush => HasUpdate ? Brushes.Gold : VersionBrush;
     public string CardActionName => CanSelectForUpdate ? $"Выбрать обновление: {Name}" : $"Проверить: {Name}";

@@ -15,18 +15,18 @@
 
 function Compare-CheckVersions
 {
-    param([string]$Stage, $Installed, $Available)
+    param([string]$Stage, $Installed, $Available, [string]$Info = $null)
     if ($null -eq $Installed -or $null -eq $Available)
     {
         Write-CheckResult $Stage 'UNKNOWN' "Version comparison unavailable. Installed: $Installed; latest: $Available" $Installed $Available -Info 'Не удалось получить установленную или доступную версию'
     }
     elseif ((Compare-PackageVersions "$Installed" "$Available") -lt 0)
     {
-        Write-CheckResult $Stage 'AVAILABLE' "Update available: $Installed -> $Available" $Installed $Available
+        Write-CheckResult $Stage 'AVAILABLE' "Update available: $Installed -> $Available" $Installed $Available -Info $Info
     }
     else
     {
-        Write-CheckResult $Stage 'CURRENT' "Up to date: $Installed (latest: $Available)" $Installed $Available
+        Write-CheckResult $Stage 'CURRENT' "Up to date: $Installed (latest: $Available)" $Installed $Available -Info $Info
     }
 }
 
@@ -48,13 +48,33 @@ function Test-WingetUpdate
             throw "winget list failed: $( $state.ExitCode ): $( $state.Text )"
         }
         'INSTALLED' {
-            if ($null -eq $state.Available -and $Source -eq 'msstore')
+            $available = $state.Available
+            $info = $null
+            if ($null -eq $available -and $Source -eq 'msstore')
             {
-                Write-CheckResult $Stage 'UNKNOWN' 'Microsoft Store did not expose an available version in winget list' $state.Installed -Info 'winget list не подтвердил доступную версию Microsoft Store'
-                return
+                if ($Stage -ne 'Windows Terminal')
+                {
+                    Write-CheckResult $Stage 'UNKNOWN' 'Microsoft Store did not expose an available version in winget list' $state.Installed -Info 'winget list не подтвердил доступную версию Microsoft Store'
+                    return
+                }
+                try
+                {
+                    $catalog = Get-WingetPackageState -PackageId 'Microsoft.WindowsTerminal' -Source 'winget'
+                    if ($catalog.Status -ne 'INSTALLED' -or $catalog.Installed -ne $state.Installed)
+                    {
+                        throw "Windows Terminal catalog lookup did not match the installed Store package: $( $catalog.Status ); $( $catalog.ExitCode ); $( $catalog.Text )"
+                    }
+                    $available = if ($null -ne $catalog.Available) { $catalog.Available } else { $catalog.Installed }
+                    $info = 'Версия проверена по каталогу winget; обновление через Microsoft Store'
+                }
+                catch
+                {
+                    Write-CheckResult $Stage 'ERROR' $_.Exception.Message $state.Installed -Info 'Не удалось сравнить Windows Terminal с каталогом winget'
+                    return
+                }
             }
-            $available = if ($null -ne $state.Available) { $state.Available } else { $state.Installed }
-            Compare-CheckVersions $Stage $state.Installed $available
+            if ($null -eq $available) { $available = $state.Installed }
+            Compare-CheckVersions $Stage $state.Installed $available -Info $info
         }
         default {
             Write-CheckResult $Stage 'ERROR' "Could not parse winget version information: $( $state.Text )" -Info 'Не удалось прочитать версии из ответа winget'

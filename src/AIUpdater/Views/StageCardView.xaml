@@ -53,8 +53,8 @@
             </Grid>
             <TextBlock Grid.Column="2" Text="{Binding InstalledVersion, TargetNullValue=–}" Foreground="{DynamicResource Fg.Secondary}"
                        VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding InstalledVersion}" Margin="0,0,10,0" />
-            <TextBlock Grid.Column="3" Text="{Binding AvailableVersion, TargetNullValue=–}" Foreground="{Binding VersionTargetBrush}"
-                       VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding AvailableVersion}" Margin="0,0,10,0" />
+            <TextBlock x:Name="AvailableVersionText" Grid.Column="3" Text="{Binding AvailableVersionDisplayText}" Foreground="{Binding VersionTargetBrush}"
+                       VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding ResultDescription}" Margin="0,0,10,0" />
             <StackPanel Grid.Column="4" VerticalAlignment="Center" Margin="0,0,8,0" ToolTip="{Binding ResultDescription}">
                 <DockPanel>
                     <Ellipse DockPanel.Dock="Left" Fill="{Binding StatusBrush}" Width="5" Height="5" Margin="0,0,7,0" VerticalAlignment="Center" />

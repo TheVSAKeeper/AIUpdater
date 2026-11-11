@@ -758,6 +758,23 @@ internal static partial class Program
             item.InvalidateResult();
         }
 
+        var desktopStage = viewModel.Stages.Single(item => item.Id == "Codex desktop");
+        var desktopCard = Descendants<StageCardView>(updatesView).Single(card => ((StageCardViewModel)card.DataContext).Stage == desktopStage);
+        var availableVersionText = (TextBlock)desktopCard.FindName("AvailableVersionText");
+        desktopStage.SetCheckResult("AVAILABLE", "26.1103.7773.0", info: "Microsoft Store не передаёт номер новой версии до установки");
+        visualHost.Settle();
+        Check(desktopStage.AvailableVersion is null && desktopStage.HasUpdate && desktopStage.IsSelectedForUpdate && desktopStage.Status == "Есть обновление",
+            "Store update without a target version lost availability or invented a version");
+        Check(availableVersionText.Text == "Не сообщается" && availableVersionText.ToolTip.ToString()!.Contains(desktopStage.Info!),
+            "Available version cell hid the Store limitation");
+        desktopStage.SetCheckResult("AVAILABLE", "26.1103.7773.0", "26.1110.7780.0");
+        visualHost.Settle();
+        Check(availableVersionText.Text == "26.1110.7780.0", "Known target version did not replace the Store placeholder");
+        desktopStage.SetCheckResult("CURRENT", "26.1103.7773.0");
+        visualHost.Settle();
+        Check(availableVersionText.Text == "–" && !desktopStage.HasUpdate, "Unavailable target version implies an update without Store confirmation");
+        desktopStage.InvalidateResult();
+
         var stage = viewModel.Stages.Single(item => item.Id == "Claude Code");
         stage.SetCheckResult("AVAILABLE", "2.1.299", "2.2.1");
         stage.Queue();
