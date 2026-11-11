@@ -3,6 +3,3 @@ contact_links:
   - name: Руководство и частые вопросы
     url: https://github.com/TheVSAKeeper/AIUpdater/blob/master/GUIDE.md
     about: Установка, компоненты, перевод и журналы
-  - name: Сообщить об уязвимости
-    url: https://github.com/TheVSAKeeper/AIUpdater/security/advisories/new
-    about: Конфиденциальный отчёт владельцу проекта
