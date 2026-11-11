@@ -20,8 +20,8 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable, KeepShel
     private bool _suppressTextSync;
 
     [ActivatorUtilitiesConstructor]
-    public ChangelogViewModel(MainViewModel updates, IChangelogService changelogService, IUpdaterDialogs dialogService, TranslationAgentViewModel agentSettings)
-        : this(updates.Stages, null, changelogService, dialogService, agentSettings)
+    public ChangelogViewModel(MainViewModel updates, IChangelogService changelogService, IUpdaterDialogs dialogService)
+        : this(updates.Stages, null, changelogService, dialogService)
     {
     }
 
@@ -29,12 +29,10 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable, KeepShel
         IEnumerable<UpdateStage> stages,
         UpdateStage? selected = null,
         IChangelogService? changelogService = null,
-        IUpdaterDialogs? dialogService = null,
-        TranslationAgentViewModel? agentSettings = null)
+        IUpdaterDialogs? dialogService = null)
     {
         _changelogService = changelogService ?? new ChangelogService();
         _dialogService = dialogService;
-        AgentSettings = agentSettings ?? new(_changelogService.Translator.Settings);
         _changelogService.Translator.Settings.Changed += OnAgentChanged;
         _allStages = stages.ToArray();
         _state = new ChangelogPresentationState(UpdateTranslationBannerLiveText);
@@ -46,7 +44,6 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable, KeepShel
         ZoomOutCommand = new RelayCommand(() => SetBaseFontSize(BaseFontSize - 1));
         ZoomResetCommand = new RelayCommand(() => SetBaseFontSize(DefaultFontSize));
         OpenSourceCommand = new RelayCommand(OpenSource, () => CanOpenSource);
-        OpenAgentSettingsCommand = new RelayCommand(() => _dialogService?.OpenSettings());
         UpdateChannelButtonState();
         UpdateLanguageButtonText();
 
@@ -61,8 +58,6 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable, KeepShel
         SelectedStage = selected ?? _allStages.FirstOrDefault();
     }
 
-    public TranslationAgentViewModel AgentSettings { get; }
-    public IRelayCommand OpenAgentSettingsCommand { get; }
     public string PageTitle => "Что нового";
     public string PageDescription => "История выпусков, перевод и краткие описания";
     System.Windows.Input.ICommand KeepShell.ViewModels.IPageRefresh.RefreshCommand => RefreshCommand;

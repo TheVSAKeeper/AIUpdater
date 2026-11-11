@@ -146,12 +146,8 @@ internal static partial class Program
         ((TextBox)changelog.FindName("ChangelogTextBox")).Text = "Пример содержимого окна «Что нового».\nПроверка тёмных рамок, списка, выделения и полосы прокрутки.";
         Render((FrameworkElement)changelog.Content, Path.Combine(output, "changelog.png"), 920, 600);
         Check(Descendants<ListBoxItem>(list).All(item => item.Template is not null), "Changelog rows lost their template");
-        Render((FrameworkElement)changelog.Content, Path.Combine(output, "changelog-agent-settings.png"), 1120, 740);
-        Check(((Button)changelog.FindName("TranslationSettingsButton")).IsEnabled, "Translation settings button is unavailable");
-        Render((FrameworkElement)changelog.Content, Path.Combine(output, "changelog-agent-minimum.png"), 860, 540);
-        var settingsButton = (Button)changelog.FindName("TranslationSettingsButton");
-        var settingsPosition = settingsButton.TranslatePoint(new(), (UIElement)changelog.Content);
-        Check(settingsPosition.X >= 0 && settingsPosition.X + settingsButton.ActualWidth <= 860, "Translation settings are clipped in the narrow changelog window");
+        Render((FrameworkElement)changelog.Content, Path.Combine(output, "changelog-wide.png"), 1120, 740);
+        Render((FrameworkElement)changelog.Content, Path.Combine(output, "changelog-minimum.png"), 860, 540);
         changelog.Close();
         var dialogModel = new MessageDialogViewModel("Удаление компонента", "Удалить выбранный компонент?", true, "Удалить");
         var dialog = new MessageDialogView { DataContext = dialogModel };

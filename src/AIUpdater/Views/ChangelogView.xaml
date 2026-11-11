@@ -9,19 +9,24 @@
         <BooleanToVisibilityConverter x:Key="BoolVisibility" />
         <DataTemplate DataType="{x:Type models:UpdateStage}">
             <Grid Margin="2,1">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
                 <TextBlock Text="{Binding Name}"
                            FontSize="{DynamicResource Font.Size.Button}"
+                           TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"
+                           ToolTip="{Binding Name}"
                            VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1"
+                <TextBlock Grid.Row="1"
                            Text="{Binding InstalledVersion}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip="{Binding InstalledVersion}"
                            FontSize="{DynamicResource Font.Size.XS}"
                            Foreground="{DynamicResource Fg.Muted}"
-                           Margin="8,0,0,0"
+                           Margin="0,3,0,0"
                            VerticalAlignment="Center" />
             </Grid>
         </DataTemplate>
@@ -35,7 +40,6 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <StackPanel>
         <WrapPanel Margin="0,0,0,10">
                 <Border Width="20"
                         Height="20"
@@ -105,23 +109,6 @@
                         Padding="9,5"
                         ToolTip="Увеличить размер текста (Ctrl + Колесо мыши)" />
         </WrapPanel>
-        <Border Background="{DynamicResource Bg.Surface}" BorderBrush="{DynamicResource Border.Default}"
-                BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,12">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                    <TextBlock Text="Агент перевода" FontSize="{DynamicResource Font.Size.XS}" Foreground="{DynamicResource Fg.Muted}" />
-                    <TextBlock Text="{Binding AgentSettings.SavedDescription}" TextTrimming="CharacterEllipsis"
-                               ToolTip="{Binding AgentSettings.SavedDescription}" Margin="0,3,0,0" />
-                </StackPanel>
-                <Button x:Name="TranslationSettingsButton" Grid.Column="1" Content="Настроить…"
-                        Command="{Binding OpenAgentSettingsCommand}" MinHeight="32" Padding="12,5" VerticalAlignment="Center" />
-            </Grid>
-        </Border>
-        </StackPanel>
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="245" />
@@ -162,8 +149,14 @@
                          BorderBrush="{DynamicResource Border.Default}"
                          Foreground="{DynamicResource Fg.Primary}"
                          ScrollViewer.CanContentScroll="False"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          ItemsSource="{Binding StagesView}"
                          SelectedItem="{Binding SelectedStage, Mode=TwoWay}">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ListBox.ItemContainerStyle>
                     <ListBox.GroupStyle>
                         <GroupStyle>
                             <GroupStyle.HeaderTemplate>

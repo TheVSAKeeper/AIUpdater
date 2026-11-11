@@ -120,6 +120,7 @@ internal static partial class Program
             shell.Navigate(SectionKey.Changelog);
             host.Settle();
             Check(Descendants<ChangelogView>(window).Single().IsVisible, "Generated changelog view did not open");
+            CheckChangelogOverflow(host, window, shell, output, width);
             Render((FrameworkElement)window.Content, Path.Combine(output, $"shell-changelog-{width}.png"), width, height);
             shell.ShowSettings();
             host.Settle();
@@ -159,6 +160,37 @@ internal static partial class Program
         Check(Application.Current.Windows.Count == 1, "A page or confirmation opened an additional window");
         CheckAgentSettingsMigration(output);
         Console.WriteLine("PASS: real ShellLayout, generated page pairs, navigation retention, singleton state and in-shell confirmation");
+    }
+
+    private static void CheckChangelogOverflow(VisualTestHost host, MainWindow window, ShellViewModel shell, string output, int width)
+    {
+        var component = shell.Updates.Stages[0];
+        var original = (component.CheckResult, component.InstalledVersion, component.AvailableVersion, component.Info);
+        component.SetCheckResult("AVAILABLE", "26.1103.7773.0 (Microsoft Store, very long installed build)", "26.1104.8888.0");
+        shell.Changelog.RenderDocument(new AIUpdater.Models.ChangelogDocument
+        {
+            StageId = component.Id,
+            Releases = [new()
+            {
+                Version = "26.1103.7773.0",
+                Title = "ChatGPT / Codex App 26.1103 (Microsoft Store 26.1103.7773.0), extended release description",
+                Groups = [new() { Category = AIUpdater.Models.ChangeCategory.Changed, Title = "Изменено и улучшено", Items = ["Установлен пакет Microsoft Store `OpenAI.Codex : v26.1103.7773.0`, подробности этого выпуска доступны в официальном источнике."] }],
+            }],
+        }, component);
+        var view = Descendants<ChangelogView>(window).Single();
+        foreach (var scale in new[] { 1.0, 1.6 })
+        {
+            shell.Preferences.FontScale = scale;
+            host.Settle();
+            var list = (ListBox)view.FindName("ComponentList");
+            Check(Descendants<ScrollViewer>(list).All(scroll => scroll.ScrollableWidth <= 1 && scroll.ComputedHorizontalScrollBarVisibility == Visibility.Collapsed), "Long installed versions caused horizontal scrolling in the grouped component list");
+            var releases = (ScrollViewer)view.FindName("ReleasesScrollViewer");
+            Check(releases.ScrollableWidth <= 1, "Release cards overflow their viewport");
+            Render((FrameworkElement)window.Content, Path.Combine(output, $"changelog-overflow-{width}-{(int)(scale * 100)}.png"), width, 700);
+        }
+        shell.Preferences.FontScale = 1;
+        component.SetCheckResult(original.CheckResult ?? "UNKNOWN", original.InstalledVersion, original.AvailableVersion, info: original.Info);
+        host.Settle();
     }
 
     private static void CheckAgentSettingsMigration(string output)
