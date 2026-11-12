@@ -38,7 +38,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AppNavigator>();
         services.AddSingleton<IAppNavigator>(provider => provider.GetRequiredService<AppNavigator>());
         services.AddSingleton<IUpdaterDialogs, UpdaterDialogs>();
+        services.AddSingleton<IDotNetPackageService>(provider => new DotNetPackageService(
+            provider.GetRequiredService<IChangelogContentFetcher>(),
+            provider.GetRequiredService<AppPaths>()));
         services.AddSingleton<MainViewModel>();
+        services.AddSingleton<DotNetViewModel>();
         services.AddSingleton<LogPanelViewModel>(provider => provider.GetRequiredService<MainViewModel>().LogPanel);
         services.AddSingleton<ChangelogViewModel>();
         services.AddSingleton<ShellPreferences>();

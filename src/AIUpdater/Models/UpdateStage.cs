@@ -74,11 +74,15 @@ public sealed class UpdateStage : ObservableObject
             "https://raw.githubusercontent.com/docker/docs/main/content/manuals/desktop/release-notes.md",
             "markdown",
             "Официальная история выпусков Docker Desktop.")),
-        new(".NET SDK 10", "Разработка", ".NET SDK 10", true, static _ => new(
-            "https://github.com/dotnet/core/tree/main/release-notes/10.0",
-            "https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json",
-            "dotnet-releases",
-            "Официальные метаданные выпусков .NET 10 SDK, Runtime и исправлений безопасности (CVE).")),
+        new(".NET SDK 10", "Разработка", ".NET", true, static installedVersion =>
+        {
+            var major = Math.Max(10, ExtractHighestMajorVersion(installedVersion) ?? 10);
+            return new(
+                $"https://github.com/dotnet/core/tree/main/release-notes/{major}.0",
+                $"https://builds.dotnet.microsoft.com/dotnet/release-metadata/{major}.0/releases.json",
+                "dotnet-releases",
+                $"Официальные метаданные выпусков .NET {major} SDK, Runtime и исправлений безопасности (CVE).");
+        }),
         new("Git", "Разработка", "Git", true, static _ => new(
             "https://github.com/git-for-windows/git/releases",
             "https://api.github.com/repos/git-for-windows/git/releases?per_page=10",
@@ -290,6 +294,25 @@ public sealed class UpdateStage : ObservableObject
 
         var match = Regex.Match(version, @"\b(\d{2})\.\d+");
         return match.Success && int.TryParse(match.Groups[1].Value, out var major) ? major : null;
+    }
+
+    private static int? ExtractHighestMajorVersion(string? version)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return null;
+        }
+
+        int? highest = null;
+        foreach (Match match in Regex.Matches(version, @"\b(\d{1,2})\.\d+"))
+        {
+            if (int.TryParse(match.Groups[1].Value, out var major) && (highest is null || major > highest.Value))
+            {
+                highest = major;
+            }
+        }
+
+        return highest;
     }
 
     private void Refresh()

@@ -232,6 +232,57 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
         }
     }
 
+    public async Task<bool> RunDotNetPackageAsync(DotNetOperationRequest operation)
+    {
+        if (IsRunning)
+        {
+            return false;
+        }
+
+        if (!_executionService.ScriptExists())
+        {
+            _dialogService.ShowMessage($"Скрипт не найден:\n{ScriptPath}", "AI Updater");
+            return false;
+        }
+
+        var dotNetStage = Stages.FirstOrDefault(stage => stage.Id == ".NET SDK 10");
+        _action = operation.ActionScriptName;
+        _checkOnly = false;
+        _runStages = dotNetStage is not null ? [dotNetStage] : [];
+        _stopRequested = false;
+        var sawError = false;
+        var exitCode = -1;
+        using var cts = _runCancellation = new CancellationTokenSource();
+        _runCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            LogPanel.GeneralLogText = "";
+            dotNetStage?.Queue();
+            OverallStatusText = operation.DisplayLabel;
+            IsRunning = true;
+            (exitCode, sawError) = await _executionService.ExecuteDotNetOperationAsync(
+                Stages, Vendors, operation, () => _stopRequested, AppendLine, cts.Token);
+        }
+        catch (Exception exception)
+        {
+            AppendLine(exception.ToString());
+            sawError = true;
+        }
+        finally
+        {
+            OverallStatusText = _executionService.FinishRun(
+                Stages, Vendors, _runStages, dotNetStage, _action, false, exitCode, sawError, _stopRequested, error => AppendLine(error));
+            IsRunning = false;
+            if (ReferenceEquals(_runCancellation, cts))
+            {
+                _runCancellation = null;
+            }
+            _runCompletion.TrySetResult();
+        }
+
+        return exitCode == 0 && !sawError && !_stopRequested;
+    }
+
     public VendorRun CreateVendorRun(string vendor, params UpdateStage[] stages)
     {
         _runStages = stages.Length > 0 ? stages : Stages.ToArray();
@@ -269,6 +320,12 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
     {
         if (IsRunning || stage is null || !stage.CanManageInstallation)
         {
+            return;
+        }
+
+        if (stage.Id == ".NET SDK 10")
+        {
+            _dialogService.OpenDotNetManager();
             return;
         }
 

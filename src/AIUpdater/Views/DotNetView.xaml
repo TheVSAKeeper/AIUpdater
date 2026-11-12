@@ -1,0 +1,164 @@
+﻿<UserControl x:Class="AIUpdater.Views.DotNetView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AIUpdater.ViewModels"
+             FontSize="{DynamicResource Font.Size.S}">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolVisibility" />
+    </UserControl.Resources>
+    <Grid Grid.IsSharedSizeScope="True">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <DockPanel Margin="0,0,0,8">
+            <Button x:Name="RefreshCatalogButton" DockPanel.Dock="Right" Content="Обновить каталог"
+                    Command="{Binding RefreshCommand}" Margin="12,0,0,0" VerticalAlignment="Center" />
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="SummaryTextBlock" Text="{Binding SummaryText}" Foreground="{DynamicResource Fg.Secondary}"
+                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <TextBlock x:Name="BusyTitleTextBlock" Text="{Binding BusyTitle}" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Accent.Text}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                           Visibility="{Binding IsBusy, Converter={StaticResource BoolVisibility}}" />
+            </StackPanel>
+        </DockPanel>
+        <WrapPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+            <CheckBox x:Name="PrereleaseToggle" Content="Предварительные выпуски" IsChecked="{Binding ShowPrerelease}"
+                      IsEnabled="{Binding CanInteract}" Margin="0,0,16,4"
+                      ToolTip="Показывать preview и RC-сборки внутри активных веток .NET" />
+            <CheckBox x:Name="EolToggle" Content="Устаревшие ветки (EOL)" IsChecked="{Binding ShowEol}"
+                      Margin="0,0,16,4"
+                      ToolTip="Показывать ветки .NET с завершённым сроком официальной поддержки" />
+            <CheckBox x:Name="InstalledOnlyToggle" Content="Только установленные" IsChecked="{Binding InstalledOnly}"
+                      Margin="0,0,0,4"
+                      ToolTip="Оставить только локально установленные пакеты SDK и Runtime" />
+        </WrapPanel>
+        <Border x:Name="BusyProgressPanel" Grid.Row="2" Margin="0,0,0,10"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolVisibility}}">
+            <ProgressBar IsIndeterminate="True" Height="3" MinHeight="0" />
+        </Border>
+        <Border x:Name="WarningBanner" Grid.Row="3" Background="{DynamicResource State.WarningSoft}"
+                BorderBrush="{DynamicResource Border.Subtle}" BorderThickness="1" CornerRadius="6"
+                Padding="10,6" Margin="0,0,0,10"
+                Visibility="{Binding HasWarning, Converter={StaticResource BoolVisibility}}">
+            <TextBlock Text="{Binding WarningMessage}" Foreground="{DynamicResource State.WarningText}"
+                       TextWrapping="Wrap" />
+        </Border>
+        <Grid Grid.Row="4">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid>
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Margin" Value="17,0,11,8" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ComputedVerticalScrollBarVisibility, ElementName=ChannelsScroll}" Value="Visible">
+                                <Setter Property="Margin" Value="17,0,27,8" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2.1*" />
+                    <ColumnDefinition Width="1.1*" />
+                    <ColumnDefinition Width="1.1*" />
+                    <ColumnDefinition Width="1.3*" />
+                    <ColumnDefinition Width="Auto" SharedSizeGroup="DotNetActions" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Пакет" Foreground="{DynamicResource Fg.Muted}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="1" Text="Установлено" Foreground="{DynamicResource Fg.Muted}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="2" Text="Доступно" Foreground="{DynamicResource Fg.Muted}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="3" Text="Состояние" Foreground="{DynamicResource Fg.Muted}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+            </Grid>
+            <ScrollViewer x:Name="ChannelsScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <ItemsControl x:Name="ChannelsItemsControl" ItemsSource="{Binding Channels}" Margin="0,0,0,6">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:DotNetChannelViewModel}">
+                                <Border Margin="0,0,0,16">
+                                    <StackPanel>
+                                        <DockPanel Margin="14,0,6,6">
+                                            <Button DockPanel.Dock="Right" Content="История выпусков"
+                                                    Command="{Binding OpenReleaseNotesCommand}"
+                                                    Style="{DynamicResource Button.Ghost}" Padding="8,2" MinHeight="22"
+                                                    FontSize="{DynamicResource Font.Size.XS}" VerticalAlignment="Center" />
+                                            <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource Fg.Primary}" VerticalAlignment="Center"
+                                                           Margin="0,0,8,0" />
+                                                <Border CornerRadius="4" Padding="6,1" Margin="0,0,10,0" VerticalAlignment="Center">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border">
+                                                            <Setter Property="Background" Value="{DynamicResource State.InfoSoft}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding BadgeKind}" Value="{x:Static vm:DotNetChannelBadgeKind.Lts}">
+                                                                    <Setter Property="Background" Value="{DynamicResource Accent.Soft}" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding BadgeKind}" Value="{x:Static vm:DotNetChannelBadgeKind.Preview}">
+                                                                    <Setter Property="Background" Value="{DynamicResource State.WarningSoft}" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding BadgeKind}" Value="{x:Static vm:DotNetChannelBadgeKind.Eol}">
+                                                                    <Setter Property="Background" Value="{DynamicResource State.ErrorSoft}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
+                                                    <TextBlock Text="{Binding BadgeText}" FontSize="{DynamicResource Font.Size.XS}" FontWeight="SemiBold">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="{DynamicResource State.InfoText}" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding BadgeKind}" Value="{x:Static vm:DotNetChannelBadgeKind.Lts}">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource Accent.Text}" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding BadgeKind}" Value="{x:Static vm:DotNetChannelBadgeKind.Preview}">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource State.WarningText}" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding BadgeKind}" Value="{x:Static vm:DotNetChannelBadgeKind.Eol}">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource State.ErrorText}" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Border>
+                                                <TextBlock Text="{Binding SupportSummary}" Foreground="{DynamicResource Fg.Muted}"
+                                                           FontSize="{DynamicResource Font.Size.XS}" VerticalAlignment="Center"
+                                                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                            </WrapPanel>
+                                        </DockPanel>
+                                        <Border Background="{DynamicResource Bg.Surface}" CornerRadius="6"
+                                                BorderBrush="{DynamicResource Border.Subtle}" BorderThickness="1">
+                                            <ItemsControl ItemsSource="{Binding Packages}" />
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Border Background="{DynamicResource Bg.Surface}" CornerRadius="6"
+                            BorderBrush="{DynamicResource Border.Subtle}" BorderThickness="1" Padding="18"
+                            Visibility="{Binding IsEmptyStateVisible, Converter={StaticResource BoolVisibility}}">
+                        <TextBlock Text="{Binding EmptyStateText}" Foreground="{DynamicResource Fg.Muted}"
+                                   HorizontalAlignment="Center" TextWrapping="Wrap" />
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</UserControl>

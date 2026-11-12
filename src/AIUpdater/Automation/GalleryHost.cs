@@ -14,7 +14,7 @@ namespace AIUpdater.Automation;
 
 internal sealed class GalleryHost(MainWindow window, IReadOnlyList<string> pages) : IGalleryHost
 {
-    private static readonly string[] PageKeys = [SectionKey.Updates, SectionKey.Changelog, SectionKey.Logs, SectionKey.Settings, "appearance", "confirmation"];
+    private static readonly string[] PageKeys = [SectionKey.Updates, SectionKey.DotNet, SectionKey.Changelog, SectionKey.Logs, SectionKey.Settings, "appearance", "confirmation"];
     private readonly ShellViewModel _shell = window.ViewModel;
     public string AppName => "AI Updater";
     public string AppVersion => _shell.AppVersion;
@@ -47,6 +47,7 @@ internal sealed class GalleryHost(MainWindow window, IReadOnlyList<string> pages
             {
                 collection.AddSingleton<IChangelogContentFetcher>(backend);
                 collection.AddSingleton<IUpdaterProcessRunner>(backend);
+                collection.AddSingleton<IDotNetPackageService>(backend);
                 collection.AddSingleton<IChangelogTranslator, GalleryTranslator>();
             });
             var host = new GalleryHost(services.GetRequiredService<MainWindow>(), arguments.Pages);
@@ -76,6 +77,7 @@ internal sealed class GalleryHost(MainWindow window, IReadOnlyList<string> pages
                 Groups = [new ChangelogGroup { Category = ChangeCategory.Changed, Title = "Изменения", Items = ["Улучшен запуск задач в CLI.", "Сохранён контекст при переключении рабочих разделов."] }],
             }],
         }, selected);
+        _shell.DotNet.ArrangeCatalog(GalleryBackend.CreateCatalogSnapshot());
         return Task.CompletedTask;
     }
 
@@ -103,7 +105,7 @@ internal sealed class GalleryHost(MainWindow window, IReadOnlyList<string> pages
         finally { dialog?.CancelCommand.Execute(null); }
     }
 
-    private sealed class GalleryBackend : IChangelogContentFetcher, IUpdaterProcessRunner
+    private sealed class GalleryBackend : IChangelogContentFetcher, IUpdaterProcessRunner, IDotNetPackageService
     {
         private const string Notes = "## 2.1.0\n\n### Changed\n- Improved CLI startup";
         public Task<string> FetchAsync(ChangelogSource source, CancellationToken cancellationToken) => Task.FromResult(Notes);
@@ -112,6 +114,86 @@ internal sealed class GalleryHost(MainWindow window, IReadOnlyList<string> pages
         public Task<string> RunCommandAsync(string executable, IReadOnlyList<string> arguments, int timeoutSeconds, CancellationToken cancellationToken) => Task.FromResult("");
         public string? FindAgyExecutable() => null;
         public Task<int> RunAsync(UpdaterProcessRequest request, Func<string, bool, Task> onOutputChunk, Func<bool, Task> onStreamCompleted, CancellationToken cancellationToken) => Task.FromException<int>(new InvalidOperationException("Запуск обновлений недоступен в галерее."));
+        public Task<DotNetCatalogSnapshot> LoadCatalogAsync(bool forceRefresh, bool includePrerelease, CancellationToken cancellationToken) => Task.FromResult(CreateCatalogSnapshot());
+
+        public static DotNetCatalogSnapshot CreateCatalogSnapshot() => new(
+        [
+            new DotNetChannelInfo(
+                "11.0",
+                DotNetReleaseType.Sts,
+                DotNetSupportPhase.Active,
+                "11.0.0",
+                "11.0.100",
+                "11.0.0",
+                "2028-05-14",
+                [
+                    new DotNetPackageEntry("11.0", DotNetPackageKind.Sdk, [], "11.0.100", "11.0.100", false, []),
+                    new DotNetPackageEntry("11.0", DotNetPackageKind.DesktopRuntime, [], "11.0.0", "11.0.0", false, []),
+                    new DotNetPackageEntry("11.0", DotNetPackageKind.AspNetCoreRuntime, [], "11.0.0", "11.0.0", false, []),
+                    new DotNetPackageEntry("11.0", DotNetPackageKind.Runtime, [], "11.0.0", "11.0.0", false, []),
+                ]),
+            new DotNetChannelInfo(
+                "10.0",
+                DotNetReleaseType.Lts,
+                DotNetSupportPhase.Active,
+                "10.0.5",
+                "10.0.202",
+                "10.0.5",
+                "2028-11-14",
+                [
+                    new DotNetPackageEntry(
+                        "10.0",
+                        DotNetPackageKind.Sdk,
+                        [new DotNetInstalledInstance("10.0.201", DotNetInstallOwner.MicrosoftInstaller, "Microsoft .NET SDK 10.0.201 (x64)")],
+                        "10.0.202",
+                        "10.0.202",
+                        true,
+                        [new DotNetSdkBandPlan("10.0.201", "10.0.202", true)]),
+                    new DotNetPackageEntry(
+                        "10.0",
+                        DotNetPackageKind.DesktopRuntime,
+                        [new DotNetInstalledInstance("10.0.5", DotNetInstallOwner.SharedWithSdk)],
+                        "10.0.5",
+                        "10.0.5",
+                        false,
+                        []),
+                    new DotNetPackageEntry(
+                        "10.0",
+                        DotNetPackageKind.AspNetCoreRuntime,
+                        [new DotNetInstalledInstance("10.0.5", DotNetInstallOwner.SharedWithSdk)],
+                        "10.0.5",
+                        "10.0.5",
+                        false,
+                        []),
+                    new DotNetPackageEntry(
+                        "10.0",
+                        DotNetPackageKind.Runtime,
+                        [new DotNetInstalledInstance("10.0.5", DotNetInstallOwner.SharedWithSdk)],
+                        "10.0.5",
+                        "10.0.5",
+                        false,
+                        []),
+                ]),
+            new DotNetChannelInfo(
+                "8.0",
+                DotNetReleaseType.Lts,
+                DotNetSupportPhase.Eol,
+                "8.0.25",
+                "8.0.419",
+                "8.0.25",
+                "2026-11-10",
+                [
+                    new DotNetPackageEntry(
+                        "8.0",
+                        DotNetPackageKind.Sdk,
+                        [new DotNetInstalledInstance("8.0.301", DotNetInstallOwner.ExternalOrVisualStudio)],
+                        "8.0.419",
+                        "8.0.419",
+                        true,
+                        [new DotNetSdkBandPlan("8.0.301", "8.0.320", true)]),
+                ]),
+        ],
+        new DateTimeOffset(2026, 11, 12, 12, 0, 0, TimeSpan.Zero));
     }
 
     private sealed class GalleryTranslator(TranslationAgentSettings settings) : IChangelogTranslator

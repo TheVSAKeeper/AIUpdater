@@ -343,6 +343,117 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
         return (results.All(code => code == 0) ? 0 : 1, sawError);
     }
 
+    public async Task<(int ExitCode, bool SawError)> ExecuteDotNetOperationAsync(
+        IReadOnlyList<UpdateStage> allStages,
+        IReadOnlyList<VendorStatus> vendors,
+        DotNetOperationRequest operation,
+        Func<bool> isStopRequested,
+        Action<string, string?> appendLine,
+        CancellationToken cancellationToken)
+    {
+        const string vendor = "Разработка";
+        var requestedStage = allStages.FirstOrDefault(stage => stage.Id == ".NET SDK 10");
+        var runStages = requestedStage is not null ? new[] { requestedStage } : Array.Empty<UpdateStage>();
+        var operationState = GetOperationState(operation.ActionScriptName, false);
+        var operationName = GetOperationName(operationState);
+        var vendorStatus = vendors.First(item => item.Name == vendor);
+        vendorStatus.Log = "";
+        try
+        {
+            File.WriteAllText(vendorStatus.LogPath, $"{vendorStatus.Name}: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}" + Environment.NewLine, Encoding.UTF8);
+            File.WriteAllText(LogPath, $"AI update run: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}" + Environment.NewLine, Encoding.UTF8);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        requestedStage?.SetRunning(operationState);
+        vendorStatus.SetStatus(operationName, operation.DisplayLabel, AccentTextBrush);
+        var run = new VendorRun(vendor, runStages);
+        var temporaryLog = Path.Combine(Path.GetTempPath(), $"AIUpdater-{Guid.NewGuid():N}.log");
+        var request = new UpdaterProcessRequest(
+            ScriptPath,
+            vendor,
+            temporaryLog,
+            operation.ActionScriptName,
+            false,
+            requestedStage?.Id,
+            DotNetPackageEntry.GetScriptKindName(operation.Kind),
+            operation.Channel,
+            operation.Version,
+            operation.IncludePrerelease);
+
+        var exitCode = -1;
+        try
+        {
+            exitCode = await _processRunner.RunAsync(
+                request,
+                async (chunk, isError) =>
+                {
+                    if (Application.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
+                    {
+                        await dispatcher.InvokeAsync(() => _outputParser.HandleChunk(chunk, isError, run, operationState, vendorStatus, appendLine));
+                    }
+                    else
+                    {
+                        _outputParser.HandleChunk(chunk, isError, run, operationState, vendorStatus, appendLine);
+                    }
+                },
+                async isError =>
+                {
+                    if (Application.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
+                    {
+                        await dispatcher.InvokeAsync(() => _outputParser.FlushBuffer(isError, run, operationState, vendorStatus, appendLine));
+                    }
+                    else
+                    {
+                        _outputParser.FlushBuffer(isError, run, operationState, vendorStatus, appendLine);
+                    }
+                },
+                cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            run.SawError = true;
+            appendLine(exception.Message, vendor);
+        }
+        finally
+        {
+            var stopped = isStopRequested();
+            var successful = exitCode == 0 && !run.SawError && !stopped;
+            if (requestedStage is { IsActiveOperation: true })
+            {
+                if (successful)
+                {
+                    requestedStage.SetCompleted();
+                }
+                else
+                {
+                    requestedStage.SetFailed(stopped);
+                }
+            }
+
+            vendorStatus.SetStatus(
+                stopped ? "Остановлено" : successful ? "Готово" : "Ошибка",
+                stopped
+                    ? "Остановка запрошена пользователем"
+                    : successful
+                        ? $"{operation.DisplayLabel}: завершено"
+                        : "Завершено с ошибками" + (exitCode == 0 ? "" : $" (код {exitCode})"),
+                stopped ? Brushes.LightSlateGray : successful ? AccentTextBrush : Brushes.LightCoral);
+            appendLine(vendorStatus.Detail, vendor);
+            try
+            {
+                File.Delete(temporaryLog);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return (exitCode == 0 && run.SawError ? 1 : exitCode, run.SawError);
+    }
+
     private async Task<(int ExitCode, bool SawError)> RunVendorAsync(
         IReadOnlyList<UpdateStage> allStages,
         IReadOnlyList<VendorStatus> vendors,

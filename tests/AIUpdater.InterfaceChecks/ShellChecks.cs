@@ -33,12 +33,20 @@ internal static partial class Program
             window.SetCurrentValue(FrameworkElement.WidthProperty, (double)width);
             window.SetCurrentValue(FrameworkElement.HeightProperty, width == 1200 ? 800d : 700d);
             shell.Preferences.FontScale = scale;
-            foreach (var key in new[] { SectionKey.Updates, SectionKey.Changelog })
+            foreach (var key in new[] { SectionKey.Updates, SectionKey.DotNet, SectionKey.Changelog })
             {
                 shell.Navigate(key);
+                if (key == SectionKey.DotNet) Await(shell.DotNet.EnsureLoadedAsync());
                 host.Settle();
-                var view = key == SectionKey.Updates ? (FrameworkElement)Descendants<UpdatesView>(window).Single() : Descendants<ChangelogView>(window).Single();
-                var scrolls = key == SectionKey.Updates ? Descendants<ScrollViewer>(view) : Descendants<ScrollViewer>((ListBox)view.FindName("ComponentList"));
+                FrameworkElement view = key switch
+                {
+                    SectionKey.Updates => Descendants<UpdatesView>(window).Single(),
+                    SectionKey.DotNet => Descendants<DotNetView>(window).Single(),
+                    _ => Descendants<ChangelogView>(window).Single(),
+                };
+                var scrolls = key == SectionKey.Changelog
+                    ? Descendants<ScrollViewer>((ListBox)view.FindName("ComponentList"))
+                    : Descendants<ScrollViewer>(view);
                 Check(scrolls.All(scroll => scroll.ScrollableWidth <= 1), "Cached user data caused horizontal overflow");
                 Render((FrameworkElement)window.Content, Path.Combine(output, $"cached-{key}-{width}-{(int)(scale * 100)}.png"), width, width == 1200 ? 800 : 700);
             }
@@ -153,9 +161,13 @@ internal static partial class Program
     private static void CheckShellWindow(VisualTestHost host, MainWindow window, ShellViewModel shell, string output)
     {
         Check(window.Content is KeepShell.Views.ShellLayout { ModalCoversShell: true }, "The application must use the real ShellLayout, including its modal surface");
-        Check(shell is ShellViewModelBase && shell.Updates is IPageHeader && shell.Updates is IPageStatus && shell.Updates is IPageRefresh,
-            "The shell and update page do not expose the framework contracts");
+        Check(shell is ShellViewModelBase
+              && shell.Updates is IPageHeader && shell.Updates is IPageStatus && shell.Updates is IPageRefresh
+              && shell.DotNet is IPageHeader && shell.DotNet is IPageRefresh,
+            "The shell and pages do not expose the framework contracts");
         Check(typeof(IView<MainViewModel>).IsAssignableFrom(typeof(UpdatesView))
+              && typeof(IView<DotNetViewModel>).IsAssignableFrom(typeof(DotNetView))
+              && typeof(IView<DotNetPackageRowViewModel>).IsAssignableFrom(typeof(DotNetPackageRowView))
               && typeof(IView<ChangelogViewModel>).IsAssignableFrom(typeof(ChangelogView))
               && typeof(IView<LogPanelViewModel>).IsAssignableFrom(typeof(LogsView))
               && typeof(IView<SettingsViewModel>).IsAssignableFrom(typeof(SettingsView)), "Page pairs are not declared for the KeepShell generator");
@@ -181,6 +193,41 @@ internal static partial class Program
             var directChoices = Descendants<CheckBox>(updates).Where(box => box.DataContext is AIUpdater.Models.UpdateStage { PackageStatus: AIUpdater.Models.PackageStatus.DirectUpdate }).ToArray();
             Check(directChoices.Length == 2 && directChoices.All(box => box.IsChecked == false), "Direct updates became selected automatically");
             Render((FrameworkElement)window.Content, Path.Combine(output, $"shell-updates-{width}.png"), width, height);
+
+            var dotNetCard = cards.Single(card => ((StageCardViewModel)card.DataContext).Stage.Id == ".NET SDK 10");
+            ((StageCardViewModel)dotNetCard.DataContext).InstallCommand.Execute(null);
+            host.Settle();
+            Await(shell.DotNet.EnsureLoadedAsync());
+            host.Settle();
+            var dotNetView = Descendants<DotNetView>(window).Single();
+            Check(dotNetView.IsVisible && ReferenceEquals(dotNetView.DataContext, shell.DotNet), "General .NET card action did not navigate to the .NET manager section");
+            Check(shell.DotNet.Channels.Select(ch => ch.Info.Channel).SequenceEqual(["11.0", "10.0", "12.0"]), "Active and preview .NET channels were not ordered or EOL leaked in by default");
+            var net11Sdk = shell.DotNet.Channels.Single(ch => ch.Info.Channel == "11.0").Packages.Single(pkg => pkg.Entry.Kind == AIUpdater.Models.DotNetPackageKind.Sdk);
+            Check(net11Sdk.AvailableText == "11.0.101" && net11Sdk.PrimaryActionText == "Установить" && net11Sdk.CanInstallPrimary, ".NET 11 SDK install action is missing");
+            var net10RowView = Descendants<DotNetPackageRowView>(dotNetView)
+                .Single(row => row.DataContext is DotNetPackageRowViewModel { Entry: { Channel: "10.0", Kind: AIUpdater.Models.DotNetPackageKind.Sdk } });
+            var net10MenuBtn = (Button)net10RowView.FindName("RowMenuButton");
+            net10MenuBtn.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            var net10Menu = ((Border)net10RowView.FindName("RowBorder")).ContextMenu!;
+            var menuItems = net10Menu.Items.OfType<MenuItem>().ToArray();
+            Check(menuItems.Any(mi => mi.Header?.ToString()?.Contains("10.0.102") == true && mi.IsEnabled)
+                  && menuItems.Any(mi => mi.Header?.ToString()?.Contains("10.0.302") == true && !mi.IsEnabled),
+                "Standalone vs Visual Studio ownership was not reflected in uninstall menu items");
+            net10Menu.IsOpen = false;
+            var eolToggle = (CheckBox)dotNetView.FindName("EolToggle");
+            eolToggle.SetCurrentValue(ToggleButton.IsCheckedProperty, true);
+            host.Settle();
+            Check(shell.DotNet.Channels.Any(ch => ch.Info.Channel == "8.0" && ch.BadgeText == "EOL"), "EOL toggle did not reveal .NET 8 EOL branch");
+            eolToggle.SetCurrentValue(ToggleButton.IsCheckedProperty, false);
+            var installedOnlyToggle = (CheckBox)dotNetView.FindName("InstalledOnlyToggle");
+            installedOnlyToggle.SetCurrentValue(ToggleButton.IsCheckedProperty, true);
+            host.Settle();
+            Check(shell.DotNet.Channels.Select(ch => ch.Info.Channel).SequenceEqual(["10.0"]), "Installed-only toggle did not filter uninstalled .NET channels");
+            installedOnlyToggle.SetCurrentValue(ToggleButton.IsCheckedProperty, false);
+            host.Settle();
+            Check(Descendants<ScrollViewer>(dotNetView).All(viewer => viewer.ExtentWidth <= viewer.ViewportWidth + 1 && viewer.ScrollableWidth <= 1),
+                ".NET package list overflows horizontally");
+            Render((FrameworkElement)window.Content, Path.Combine(output, $"shell-dotnet-{width}.png"), width, height);
 
             shell.Navigate(SectionKey.Logs);
             host.Settle();
@@ -231,6 +278,13 @@ internal static partial class Program
         shell.Preferences.FontScale = 1.6;
         host.Settle();
         Check(FontScaleManager.Current == 1.6 && Descendants<ScrollViewer>(updates).All(viewer => viewer.ExtentWidth <= viewer.ViewportWidth + 1), "Font scaling caused horizontal overflow in the component list");
+        shell.Navigate(SectionKey.DotNet);
+        host.Settle();
+        var scaledDotNet = Descendants<DotNetView>(window).Single();
+        Check(Descendants<ScrollViewer>(scaledDotNet).All(viewer => viewer.ExtentWidth <= viewer.ViewportWidth + 1 && viewer.ScrollableWidth <= 1),
+            "Font scaling caused horizontal overflow in the .NET manager");
+        Render((FrameworkElement)window.Content, Path.Combine(output, "shell-dotnet-1000-160.png"), 1000, 700);
+        shell.Navigate(SectionKey.Updates);
         shell.Preferences.FontScale = 1;
         host.Settle();
 

@@ -6,7 +6,11 @@ public sealed record UpdaterProcessRequest(
     string LogPath,
     string Action,
     bool CheckOnly,
-    string? OnlyStageId);
+    string? OnlyStageId,
+    string? DotNetPackageKind = null,
+    string? DotNetChannel = null,
+    string? DotNetVersion = null,
+    bool IncludePrerelease = false);
 
 public interface IUpdaterProcessRunner
 {

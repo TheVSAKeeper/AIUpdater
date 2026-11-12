@@ -475,12 +475,86 @@ function Get-NodeLatestVersion
     return $versions[0].ToString()
 }
 
+function Get-DotNetWindowsArchitecture
+{
+    $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    switch ($arch)
+    {
+        'AMD64' { return [pscustomobject]@{ Rid = 'win-x64'; Label = 'x64' } }
+        'ARM64' { return [pscustomobject]@{ Rid = 'win-arm64'; Label = 'arm64' } }
+        default { throw "Unsupported Windows architecture for .NET installer: $arch" }
+    }
+}
+
+function Get-DotNetCliPath
+{
+    if (Test-Tool 'dotnet') { return 'dotnet' }
+    $systemDotNet = Join-Path $env:ProgramFiles 'dotnet\dotnet.exe'
+    if (Test-Path -LiteralPath $systemDotNet) { return $systemDotNet }
+    return $null
+}
+
+function Test-DotNetTrustedInstallerUrl
+{
+    param([string]$Url, [string]$ExpectedFileName)
+    $uri = $null
+    if (-not [Uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$uri)) { return $false }
+    if ($uri.Scheme -cne 'https' -or -not [string]::IsNullOrEmpty($uri.Query) -or -not [string]::IsNullOrEmpty($uri.Fragment)) { return $false }
+    if ($uri.Host -cin @('builds.dotnet.microsoft.com', 'download.visualstudio.microsoft.com'))
+    {
+        return $uri.AbsolutePath.EndsWith("/$ExpectedFileName", [StringComparison]::Ordinal)
+    }
+    return $false
+}
+
+function Get-DotNetInstalledSdks
+{
+    param([string]$Channel = '')
+    $cli = Get-DotNetCliPath
+    if (-not $cli) { return @() }
+    $result = Invoke-CommandCapture $cli @('--list-sdks') -NoLogCommand
+    if ($result.ExitCode -ne 0) { throw "Could not list .NET SDKs: $($result.Text)" }
+    $pattern = if ($Channel)
+    {
+        "^$([regex]::Escape($Channel))\.[0-9]+(?:-[0-9A-Za-z.-]+)?\s+\["
+    }
+    else
+    {
+        '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?\s+\['
+    }
+    return @($result.Text -split "`r?`n" | Where-Object { $_ -match $pattern } |
+        ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -Unique)
+}
+
+function Get-DotNetInstalledRuntimes
+{
+    param([string]$SharedFramework = '', [string]$Channel = '')
+    $cli = Get-DotNetCliPath
+    if (-not $cli) { return @() }
+    $result = Invoke-CommandCapture $cli @('--list-runtimes') -NoLogCommand
+    if ($result.ExitCode -ne 0) { throw "Could not list .NET runtimes: $($result.Text)" }
+    $items = foreach ($line in ($result.Text -split "`r?`n"))
+    {
+        if ($line -match '^(Microsoft\.(?:NETCore|WindowsDesktop|AspNetCore)\.App)\s+([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)\s+\[')
+        {
+            $name = $Matches[1]
+            $ver = $Matches[2]
+            if (($SharedFramework -and $name -ne $SharedFramework) -or ($Channel -and -not $ver.StartsWith("$Channel.", [StringComparison]::Ordinal)))
+            {
+                continue
+            }
+            [pscustomobject]@{ Name = $name; Version = $ver }
+        }
+    }
+    return @($items)
+}
+
 function Get-DevelopmentSdkVersions
 {
     if (-not (Test-Tool 'dotnet')) { return @() }
     $result = Invoke-CommandCapture 'dotnet' @('--list-sdks') -NoLogCommand
     if ($result.ExitCode -ne 0) { throw "Could not list .NET SDKs: $($result.Text)" }
-    return @($result.Text -split "`r?`n" | Where-Object { $_ -match '^10\.0\.[0-9]+\s+\[' } |
+    return @($result.Text -split "`r?`n" | Where-Object { $_ -match '^(?:1[0-9]|[2-9][0-9])\.[0-9]+\.[0-9]+\s+\[' } |
         ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -Unique)
 }
 
@@ -489,7 +563,7 @@ function Assert-DevelopmentUpdateAllowed
     param([string]$Stage)
     if ($Stage -eq '.NET SDK 10' -and @(Get-DevelopmentSdkVersions).Count -gt 1)
     {
-        throw 'Several .NET SDK 10 versions are installed. Check global.json pins and service the required SDKs individually; automatic winget upgrade was not run'
+        throw 'Several .NET SDK versions are installed. Check global.json pins and service the required SDKs individually; automatic winget upgrade was not run'
     }
 }
 
@@ -497,32 +571,45 @@ function Get-DevelopmentSdkPlan
 {
     param([string[]]$Installed)
     if (-not $Installed.Count) { return @() }
-    $response = Invoke-WebRequest -Uri 'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json' -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
-    $metadata = $response.Content | ConvertFrom-Json -ErrorAction Stop
-    if ($metadata.'channel-version' -ne '10.0' -or -not $metadata.releases) { throw 'Invalid .NET 10 release metadata' }
-    $published = @($metadata.releases | ForEach-Object { @($_.sdk) + @($_.sdks) } |
-        Where-Object { $_ -and $_.version -match '^10\.0\.[0-9]+$' })
-    foreach ($group in ($Installed | Group-Object { [math]::Floor(([version]$_).Build / 100) }))
+    $rid = (Get-DotNetWindowsArchitecture).Rid
+    foreach ($channelGroup in ($Installed | Group-Object { $v = [version]$_; "$($v.Major).$($v.Minor)" }))
     {
-        $current = $group.Group | Sort-Object { [version]$_ } -Descending | Select-Object -First 1
-        $release = $published | Where-Object { [math]::Floor(([version]$_.version).Build / 100) -eq [int]$group.Name } |
-            Sort-Object { [version]$_.version } -Descending | Select-Object -First 1
-        if (-not $release) { throw "No stable release metadata for SDK feature band 10.0.$($group.Name)xx" }
-        $file = @($release.files | Where-Object { $_.rid -eq 'win-x64' -and $_.name -eq 'dotnet-sdk-win-x64.exe' })
-        if ($file.Count -ne 1 -or $file[0].hash -notmatch '^[a-fA-F0-9]{128}$') { throw 'Invalid .NET SDK installer metadata' }
-        $expectedUrl = "https://builds.dotnet.microsoft.com/dotnet/Sdk/$($release.version)/dotnet-sdk-$($release.version)-win-x64.exe"
-        if ($file[0].url -cne $expectedUrl) { throw 'Unexpected .NET SDK installer URL' }
-        [pscustomobject]@{ Installed = $current; Available = $release.version; Update = [version]$release.version -gt [version]$current; Url = $expectedUrl; Hash = $file[0].hash }
+        $channel = $channelGroup.Name
+        $response = Invoke-WebRequest -Uri "https://builds.dotnet.microsoft.com/dotnet/release-metadata/$channel/releases.json" -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+        $metadata = $response.Content | ConvertFrom-Json -ErrorAction Stop
+        if ($metadata.'channel-version' -ne $channel -or -not $metadata.releases) { throw "Invalid .NET $channel release metadata" }
+        $published = @($metadata.releases | ForEach-Object { @($_.sdk) + @($_.sdks) } |
+            Where-Object { $_ -and $_.version -match "^$([regex]::Escape($channel))\.[0-9]+$" })
+        foreach ($group in ($channelGroup.Group | Group-Object { [math]::Floor(([version]$_).Build / 100) }))
+        {
+            $current = $group.Group | Sort-Object { [version]$_ } -Descending | Select-Object -First 1
+            $release = $published | Where-Object { [math]::Floor(([version]$_.version).Build / 100) -eq [int]$group.Name } |
+                Sort-Object { [version]$_.version } -Descending | Select-Object -First 1
+            if (-not $release) { throw "No stable release metadata for SDK feature band $channel.$($group.Name)xx" }
+            $installerName = "dotnet-sdk-$rid.exe"
+            $versionedName = "dotnet-sdk-$($release.version)-$rid.exe"
+            $file = @($release.files | Where-Object { $_.rid -eq $rid -and $_.name -eq $installerName })
+            if ($file.Count -ne 1 -or $file[0].hash -notmatch '^[a-fA-F0-9]{128}$') { throw 'Invalid .NET SDK installer metadata' }
+            if (-not (Test-DotNetTrustedInstallerUrl -Url $file[0].url -ExpectedFileName $versionedName)) { throw 'Unexpected .NET SDK installer URL' }
+            [pscustomobject]@{ Channel = $channel; Installed = $current; Available = $release.version; Update = [version]$release.version -gt [version]$current; Url = $file[0].url; Hash = $file[0].hash }
+        }
     }
 }
 
 function Assert-DevelopmentSdkInstallOwner
 {
-    $dotnet = Get-Command dotnet -ErrorAction Stop
-    if (-not [Environment]::Is64BitProcess -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -or
-        [Environment]::GetEnvironmentVariable('PROCESSOR_ARCHITECTURE', 'Machine') -ne 'AMD64' -or
-        $dotnet.Source -ine "$env:ProgramFiles\dotnet\dotnet.exe")
-    { throw 'SDK servicing supports the system-wide x64 Microsoft installer installation only; inspect the active dotnet owner' }
+    param([switch]$AllowMissingDotNet)
+    $arch = Get-DotNetWindowsArchitecture
+    $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+    $cliPath = if ($dotnet) { $dotnet.Source } else { Get-DotNetCliPath }
+    if (-not $cliPath -and -not $AllowMissingDotNet)
+    {
+        throw 'dotnet CLI was not found on PATH'
+    }
+    if (-not [Environment]::Is64BitProcess -or ($cliPath -and $cliPath -ine "$env:ProgramFiles\dotnet\dotnet.exe"))
+    {
+        throw "SDK servicing supports the system-wide $($arch.Label) Microsoft installer installation only; inspect the active dotnet owner"
+    }
     $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
     { throw 'SDK servicing requires an elevated updater to preserve installed SDKs through the Microsoft installer policy' }
@@ -530,8 +617,9 @@ function Assert-DevelopmentSdkInstallOwner
 
 function Get-DevelopmentSdkRetention
 {
+    param([string]$Channel = '10.0')
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
-    $key = $base.OpenSubKey('SOFTWARE\Microsoft\.NET\10.0')
+    $key = $base.OpenSubKey("SOFTWARE\Microsoft\.NET\$Channel")
     try
     {
         $exists = $key -and 'RemovePreviousVersion' -in $key.GetValueNames()
@@ -549,9 +637,9 @@ function Get-DevelopmentSdkRetention
 
 function Set-DevelopmentSdkRetention
 {
-    param($Restore = $null)
+    param($Restore = $null, [string]$Channel = '10.0')
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
-    $key = $base.CreateSubKey('SOFTWARE\Microsoft\.NET\10.0')
+    $key = $base.CreateSubKey("SOFTWARE\Microsoft\.NET\$Channel")
     try
     {
         if ($null -eq $Restore) { $key.SetValue('RemovePreviousVersion', 'never', [Microsoft.Win32.RegistryValueKind]::String) }
@@ -565,14 +653,50 @@ function Set-DevelopmentSdkRetention
     finally { $key.Dispose(); $base.Dispose() }
 }
 
+function Invoke-VerifiedDotNetInstaller
+{
+    param(
+        [string]$Channel,
+        [string]$Url,
+        [string]$ExpectedHash,
+        [string]$InstallerFileName,
+        [string]$EvidenceDirectory,
+        [string]$Description
+    )
+    $installer = Join-Path $EvidenceDirectory $InstallerFileName
+    Write-Log "Downloading $Description..."
+    Invoke-WebRequest -Uri $Url -OutFile $installer -UseBasicParsing -TimeoutSec 600 -ErrorAction Stop
+    if ((Get-FileHash -LiteralPath $installer -Algorithm SHA512).Hash -ine $ExpectedHash) { throw 'SDK installer SHA512 mismatch' }
+    $signature = Get-AuthenticodeSignature -LiteralPath $installer
+    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation,') { throw 'SDK installer Microsoft signature is invalid' }
+    $before = if ($Channel -eq '10.0') { Get-DevelopmentSdkRetention } else { Get-DevelopmentSdkRetention -Channel $Channel }
+    $before | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $EvidenceDirectory "retention-$Channel-before.json") -Encoding UTF8
+    try
+    {
+        if ($Channel -eq '10.0') { Set-DevelopmentSdkRetention } else { Set-DevelopmentSdkRetention -Channel $Channel }
+        $currentRetention = if ($Channel -eq '10.0') { Get-DevelopmentSdkRetention } else { Get-DevelopmentSdkRetention -Channel $Channel }
+        if ($currentRetention.Value -ne 'never') { throw 'SDK retention policy could not be verified' }
+        Write-Log "$Description; retaining existing SDKs and runtimes"
+        $logFile = Join-Path $EvidenceDirectory ("install-" + [IO.Path]::GetFileNameWithoutExtension($InstallerFileName) + ".log")
+        $process = Start-Process -FilePath $installer -ArgumentList @('/install','/quiet','/norestart',"/log `"$logFile`"") -WindowStyle Hidden -Wait -PassThru
+        if ($process.ExitCode -notin @(0,3010)) { throw "SDK installer failed: $($process.ExitCode)" }
+        if ($process.ExitCode -eq 3010) { Write-Log 'SDK installation succeeded; Windows reports that a restart is required (not initiated)' }
+    }
+    finally
+    {
+        if ($Channel -eq '10.0') { Set-DevelopmentSdkRetention -Restore $before } else { Set-DevelopmentSdkRetention -Restore $before -Channel $Channel }
+    }
+}
+
 function Update-DevelopmentSdk
 {
     $ProgressPreference = 'SilentlyContinue'
     $installed = @(Get-DevelopmentSdkVersions)
-    if (-not $installed.Count) { Write-Log '.NET SDK 10 is not installed; update skipped'; return }
+    if (-not $installed.Count) { Write-Log '.NET SDK is not installed; update skipped'; return }
     $plan = @(Get-DevelopmentSdkPlan $installed | Where-Object Update)
-    if (-not $plan.Count) { Write-Log 'Installed .NET SDK 10 feature bands are up to date'; return }
+    if (-not $plan.Count) { Write-Log 'Installed .NET SDK feature bands are up to date'; return }
     Assert-DevelopmentSdkInstallOwner
+    $rid = (Get-DotNetWindowsArchitecture).Rid
     $mutex = [Threading.Mutex]::new($false, $script:DotNetSdkMutexName)
     $acquired = $false
     try
@@ -585,25 +709,16 @@ function Update-DevelopmentSdk
         $runtimes = Invoke-CommandCapture 'dotnet' @('--list-runtimes') -NoLogCommand
         if ($runtimes.ExitCode -ne 0) { throw 'Could not inventory runtimes before SDK servicing' }
         $runtimes.Text | Set-Content -LiteralPath (Join-Path $directory 'runtimes-before.txt') -Encoding UTF8
-        $before = Get-DevelopmentSdkRetention
-        $before | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $directory 'retention-before.json') -Encoding UTF8
         foreach ($item in $plan)
         {
-            $installer = Join-Path $directory "dotnet-sdk-$($item.Available)-win-x64.exe"
-            Invoke-WebRequest -Uri $item.Url -OutFile $installer -UseBasicParsing -TimeoutSec 600 -ErrorAction Stop
-            if ((Get-FileHash -LiteralPath $installer -Algorithm SHA512).Hash -ine $item.Hash) { throw 'SDK installer SHA512 mismatch' }
-            $signature = Get-AuthenticodeSignature -LiteralPath $installer
-            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation,') { throw 'SDK installer Microsoft signature is invalid' }
-            try
-            {
-                Set-DevelopmentSdkRetention
-                if ((Get-DevelopmentSdkRetention).Value -ne 'never') { throw 'SDK retention policy could not be verified' }
-                Write-Log "Updating SDK feature band: $($item.Installed) -> $($item.Available); retaining existing SDKs and runtimes"
-                $process = Start-Process -FilePath $installer -ArgumentList @('/install','/quiet','/norestart',"/log `"$(Join-Path $directory "install-$($item.Available).log")`"") -WindowStyle Hidden -Wait -PassThru
-                if ($process.ExitCode -notin @(0,3010)) { throw "SDK installer failed: $($process.ExitCode)" }
-                if ($process.ExitCode -eq 3010) { Write-Log 'SDK installation succeeded; Windows reports that a restart is required (not initiated)' }
-            }
-            finally { Set-DevelopmentSdkRetention -Restore $before }
+            $channel = if ($item.PSObject.Properties['Channel'] -and $item.Channel) { $item.Channel } else { '10.0' }
+            Invoke-VerifiedDotNetInstaller `
+                -Channel $channel `
+                -Url $item.Url `
+                -ExpectedHash $item.Hash `
+                -InstallerFileName "dotnet-sdk-$($item.Available)-$rid.exe" `
+                -EvidenceDirectory $directory `
+                -Description "Updating SDK feature band: $($item.Installed) -> $($item.Available)"
             $after = @(Get-DevelopmentSdkVersions)
             foreach ($version in @($installed) + @($item.Available))
             {
@@ -618,6 +733,288 @@ function Update-DevelopmentSdk
             }
         }
         Write-Log "SDK servicing verified; previous versions retained. Evidence: $directory"
+    }
+    finally { if ($acquired) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
+}
+
+function Resolve-DotNetReleaseInstaller
+{
+    param(
+        [Parameter(Mandatory)]$Metadata,
+        [Parameter(Mandatory)][string]$Channel,
+        [Parameter(Mandatory)][ValidateSet('Sdk', 'DesktopRuntime', 'AspNetCoreRuntime', 'Runtime')][string]$Kind,
+        [string]$Version = '',
+        [switch]$IncludePrerelease
+    )
+    if ($Metadata.'channel-version' -ne $Channel -or -not $Metadata.releases)
+    {
+        throw "Invalid .NET $Channel release metadata"
+    }
+    $rid = (Get-DotNetWindowsArchitecture).Rid
+    $prefix = switch ($Kind)
+    {
+        'Sdk' { 'dotnet-sdk' }
+        'Runtime' { 'dotnet-runtime' }
+        'DesktopRuntime' { 'windowsdesktop-runtime' }
+        'AspNetCoreRuntime' { 'aspnetcore-runtime' }
+    }
+    $installerName = "$prefix-$rid.exe"
+    $entries = switch ($Kind)
+    {
+        'Sdk' { @($Metadata.releases | ForEach-Object { @($_.sdk) + @($_.sdks) } | Where-Object { $_ -and $_.version }) }
+        'Runtime' { @($Metadata.releases | ForEach-Object { $_.runtime } | Where-Object { $_ -and $_.version }) }
+        'DesktopRuntime' { @($Metadata.releases | ForEach-Object { $_.windowsdesktop } | Where-Object { $_ -and $_.version }) }
+        'AspNetCoreRuntime' { @($Metadata.releases | ForEach-Object { $_.'aspnetcore-runtime' } | Where-Object { $_ -and $_.version }) }
+    }
+    $allowPre = [bool]$IncludePrerelease -or ($Version -match '-')
+    $candidates = @($entries | Where-Object {
+        $ver = [string]$_.version
+        if (-not $ver.StartsWith("$Channel.", [StringComparison]::Ordinal)) { return $false }
+        if (-not $allowPre -and $ver -match '-') { return $false }
+        if ($Version -and $ver -cne $Version) { return $false }
+        return $true
+    })
+    if (-not $candidates.Count -and -not $Version -and $Metadata.'support-phase' -in @('preview', 'go-live'))
+    {
+        $candidates = @($entries | Where-Object { ([string]$_.version).StartsWith("$Channel.", [StringComparison]::Ordinal) })
+    }
+    if (-not $candidates.Count)
+    {
+        throw "No matching .NET $Kind release found in channel $Channel"
+    }
+    $selected = $candidates[0]
+    foreach ($candidate in $candidates | Select-Object -Skip 1)
+    {
+        if ((Compare-PackageVersions $selected.version $candidate.version) -lt 0)
+        {
+            $selected = $candidate
+        }
+    }
+    $versionedFileName = "$prefix-$($selected.version)-$rid.exe"
+    $file = @($selected.files | Where-Object { $_.rid -eq $rid -and $_.name -eq $installerName })
+    if ($file.Count -ne 1 -or $file[0].hash -notmatch '^[a-fA-F0-9]{128}$')
+    {
+        throw "Invalid installer metadata for .NET $Kind $($selected.version)"
+    }
+    if (-not (Test-DotNetTrustedInstallerUrl -Url $file[0].url -ExpectedFileName $versionedFileName))
+    {
+        throw "Untrusted installer URL for .NET $Kind $($selected.version)"
+    }
+    return [pscustomobject]@{
+        Channel = $Channel
+        Kind = $Kind
+        Version = [string]$selected.version
+        FileName = $versionedFileName
+        Url = [string]$file[0].url
+        Hash = [string]$file[0].hash
+    }
+}
+
+function Get-DotNetUninstallEntries
+{
+    $paths = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+    return @(Get-ItemProperty -Path $paths -ErrorAction SilentlyContinue | Where-Object {
+        $_.DisplayName -and $_.SystemComponent -ne 1 -and $_.Publisher -eq 'Microsoft Corporation' -and $_.QuietUninstallString
+    })
+}
+
+function Find-DotNetStandaloneBundle
+{
+    param(
+        [Parameter(Mandatory)][ValidateSet('Sdk', 'DesktopRuntime', 'AspNetCoreRuntime', 'Runtime')][string]$Kind,
+        [Parameter(Mandatory)][string]$Version
+    )
+    $archLabel = (Get-DotNetWindowsArchitecture).Label
+    $escapedVer = [regex]::Escape($Version)
+    $escapedArch = [regex]::Escape($archLabel)
+    $namePattern = switch ($Kind)
+    {
+        'Sdk' { "^Microsoft \.NET SDK $escapedVer \($escapedArch\)$" }
+        'Runtime' { "^Microsoft \.NET Runtime - $escapedVer \($escapedArch\)$" }
+        'DesktopRuntime' { "^Microsoft Windows Desktop Runtime - $escapedVer \($escapedArch\)$" }
+        'AspNetCoreRuntime' { "^Microsoft ASP\.NET Core (?:$escapedVer - Shared Framework|Runtime - $escapedVer) \($escapedArch\)$" }
+    }
+    $entry = @(Get-DotNetUninstallEntries | Where-Object { $_.DisplayName -match $namePattern }) | Select-Object -First 1
+    if (-not $entry)
+    {
+        throw "Standalone Microsoft installer bundle for .NET $Kind $Version ($archLabel) was not found; if installed through Visual Studio, manage it in Visual Studio Installer"
+    }
+    $quiet = [string]$entry.QuietUninstallString
+    if ($quiet -notmatch '^\s*"([^"]+\.exe)"\s+/uninstall')
+    {
+        throw "Unsupported uninstall command format for $($entry.DisplayName)"
+    }
+    $exePath = [IO.Path]::GetFullPath($Matches[1])
+    $cacheRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'Package Cache')).TrimEnd('\') + '\'
+    if (-not $exePath.StartsWith($cacheRoot, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $exePath))
+    {
+        throw "Cached Microsoft bundle executable was not found at $exePath"
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $exePath
+    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation,')
+    {
+        throw "Cached bundle uninstaller signature is invalid: $exePath"
+    }
+    return [pscustomobject]@{
+        DisplayName = [string]$entry.DisplayName
+        ExecutablePath = $exePath
+    }
+}
+
+function Invoke-DotNetPackageOperation
+{
+    param(
+        [Parameter(Mandatory)][ValidateSet('Install', 'Update', 'Uninstall')][string]$Action,
+        [Parameter(Mandatory)][ValidateSet('Sdk', 'DesktopRuntime', 'AspNetCoreRuntime', 'Runtime')][string]$Kind,
+        [Parameter(Mandatory)][string]$Channel,
+        [string]$Version = '',
+        [switch]$IncludePrerelease
+    )
+    $ProgressPreference = 'SilentlyContinue'
+    if ($Channel -notmatch '^[0-9]+\.[0-9]+$') { throw "Invalid .NET channel: $Channel" }
+    Assert-DevelopmentSdkInstallOwner -AllowMissingDotNet:($Action -eq 'Install')
+
+    if ($Action -eq 'Update' -and $Kind -eq 'Sdk' -and -not $Version)
+    {
+        $allChannelSdks = @(Get-DotNetInstalledSdks -Channel $Channel)
+        if (-not $allChannelSdks.Count)
+        {
+            throw ".NET SDK $Channel is not installed; use Install instead"
+        }
+        $channelSdks = @($allChannelSdks | Where-Object { $_ -notmatch '-' })
+        if ($channelSdks.Count)
+        {
+            $plan = @(Get-DevelopmentSdkPlan $channelSdks | Where-Object Update)
+            if (-not $plan.Count)
+            {
+                Write-Log ".NET SDK $Channel feature bands are already up to date"
+                return
+            }
+            $rid = (Get-DotNetWindowsArchitecture).Rid
+            $mutex = [Threading.Mutex]::new($false, $script:DotNetSdkMutexName)
+            $acquired = $false
+            try
+            {
+                try { $acquired = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $acquired = $true }
+                if (-not $acquired) { throw 'Another .NET installer operation is running' }
+                $directory = Join-Path (Split-Path -Parent $logPath) ('dotnet-op-' + [guid]::NewGuid().ToString('N'))
+                $null = New-Item -ItemType Directory -Path $directory
+                $allSdksBefore = @(Get-DotNetInstalledSdks)
+                $allRuntimesBefore = @(Get-DotNetInstalledRuntimes)
+                $allSdksBefore | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $directory 'sdks-before.json') -Encoding UTF8
+                $allRuntimesBefore | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $directory 'runtimes-before.json') -Encoding UTF8
+                foreach ($item in $plan)
+                {
+                    Invoke-VerifiedDotNetInstaller `
+                        -Channel $Channel `
+                        -Url $item.Url `
+                        -ExpectedHash $item.Hash `
+                        -InstallerFileName "dotnet-sdk-$($item.Available)-$rid.exe" `
+                        -EvidenceDirectory $directory `
+                        -Description "Updating .NET SDK $Channel feature band: $($item.Installed) -> $($item.Available)"
+                    $sdksAfter = @(Get-DotNetInstalledSdks)
+                    foreach ($ver in @($allSdksBefore) + @($item.Available))
+                    {
+                        if ($ver -notin $sdksAfter) { throw "Required SDK $ver is missing after servicing; evidence: $directory" }
+                    }
+                    $runtimesAfter = @(Get-DotNetInstalledRuntimes)
+                    foreach ($rt in $allRuntimesBefore)
+                    {
+                        if (-not @($runtimesAfter | Where-Object { $_.Name -eq $rt.Name -and $_.Version -eq $rt.Version }).Count)
+                        {
+                            throw "Previous runtime $($rt.Name) $($rt.Version) is missing after servicing; evidence: $directory"
+                        }
+                    }
+                }
+                Write-Log ".NET SDK $Channel servicing completed. Evidence: $directory"
+                return
+            }
+            finally { if ($acquired) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
+        }
+    }
+
+    if ($Action -eq 'Uninstall')
+    {
+        if (-not $Version) { throw 'Uninstalling a .NET component requires an explicit version' }
+        $bundle = Find-DotNetStandaloneBundle -Kind $Kind -Version $Version
+        $mutex = [Threading.Mutex]::new($false, $script:DotNetSdkMutexName)
+        $acquired = $false
+        try
+        {
+            try { $acquired = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $acquired = $true }
+            if (-not $acquired) { throw 'Another .NET installer operation is running' }
+            $directory = Join-Path (Split-Path -Parent $logPath) ('dotnet-uninstall-' + [guid]::NewGuid().ToString('N'))
+            $null = New-Item -ItemType Directory -Path $directory
+            $uninstallLog = Join-Path $directory "uninstall-$Kind-$Version.log"
+            Write-Log "Uninstalling $($bundle.DisplayName)"
+            $process = Start-Process -FilePath $bundle.ExecutablePath -ArgumentList @('/uninstall','/quiet','/norestart',"/log `"$uninstallLog`"") -WindowStyle Hidden -Wait -PassThru
+            if ($process.ExitCode -notin @(0,3010)) { throw "Bundle uninstaller failed with exit code $($process.ExitCode)" }
+            if ($process.ExitCode -eq 3010) { Write-Log 'Uninstallation succeeded; Windows reports that a restart is required (not initiated)' }
+            Write-Log "Uninstalled $($bundle.DisplayName)"
+            return
+        }
+        finally { if ($acquired) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
+    }
+
+    $response = Invoke-WebRequest -Uri "https://builds.dotnet.microsoft.com/dotnet/release-metadata/$Channel/releases.json" -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+    $metadata = $response.Content | ConvertFrom-Json -ErrorAction Stop
+    $artifact = Resolve-DotNetReleaseInstaller -Metadata $metadata -Channel $Channel -Kind $Kind -Version $Version -IncludePrerelease:$IncludePrerelease
+    $mutex = [Threading.Mutex]::new($false, $script:DotNetSdkMutexName)
+    $acquired = $false
+    try
+    {
+        try { $acquired = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $acquired = $true }
+        if (-not $acquired) { throw 'Another .NET installer operation is running' }
+        $directory = Join-Path (Split-Path -Parent $logPath) ('dotnet-install-' + [guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $directory
+        $sdksBefore = @(Get-DotNetInstalledSdks)
+        $runtimesBefore = @(Get-DotNetInstalledRuntimes)
+        $sdksBefore | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $directory 'sdks-before.json') -Encoding UTF8
+        $runtimesBefore | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $directory 'runtimes-before.json') -Encoding UTF8
+        Invoke-VerifiedDotNetInstaller `
+            -Channel $Channel `
+            -Url $artifact.Url `
+            -ExpectedHash $artifact.Hash `
+            -InstallerFileName $artifact.FileName `
+            -EvidenceDirectory $directory `
+            -Description "Installing .NET $Kind $($artifact.Version)"
+        $sdksAfter = @(Get-DotNetInstalledSdks)
+        foreach ($ver in $sdksBefore)
+        {
+            if ($ver -notin $sdksAfter) { throw "Previously installed SDK $ver is missing after installation; evidence: $directory" }
+        }
+        $runtimesAfter = @(Get-DotNetInstalledRuntimes)
+        foreach ($rt in $runtimesBefore)
+        {
+            if (-not @($runtimesAfter | Where-Object { $_.Name -eq $rt.Name -and $_.Version -eq $rt.Version }).Count)
+            {
+                throw "Previously installed runtime $($rt.Name) $($rt.Version) is missing after installation; evidence: $directory"
+            }
+        }
+        if ($Kind -eq 'Sdk')
+        {
+            if ($artifact.Version -notin $sdksAfter)
+            {
+                throw ".NET SDK $($artifact.Version) was not detected after installer completed; evidence: $directory"
+            }
+        }
+        else
+        {
+            $expectedFramework = switch ($Kind)
+            {
+                'Runtime' { 'Microsoft.NETCore.App' }
+                'DesktopRuntime' { 'Microsoft.WindowsDesktop.App' }
+                'AspNetCoreRuntime' { 'Microsoft.AspNetCore.App' }
+            }
+            if (-not @($runtimesAfter | Where-Object { $_.Name -eq $expectedFramework -and $_.Version -eq $artifact.Version }).Count)
+            {
+                throw ".NET runtime $expectedFramework $($artifact.Version) was not detected after installer completed; evidence: $directory"
+            }
+        }
+        Write-Log "Installed .NET $Kind $($artifact.Version); previous versions retained. Evidence: $directory"
     }
     finally { if ($acquired) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
 }

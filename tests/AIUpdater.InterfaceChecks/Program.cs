@@ -735,8 +735,18 @@ internal static partial class Program
         CheckBindingSensor();
         using var bindingErrors = KeepShell.Bootstrap.BindingErrorSink.Attach();
         using var logging = KeepShell.Bootstrap.KeepShellLogging.Bootstrap(new() { LogsDirectory = Path.Combine(output, "diagnostics"), WriteToDebug = false });
-        using var provider = App.ConfigureServices(settings, logging, new(output, AppContext.BaseDirectory),
-            services => services.AddSingleton<IChangelogContentFetcher>(new StubChangelogContentFetcher(new Dictionary<string, string>())));
+        var stubFetcher = CreateDotNetStubFetcher();
+        var appPaths = new AIUpdater.Bootstrap.AppPaths(Path.Combine(output, "app-data-" + Guid.NewGuid().ToString("N")), AppContext.BaseDirectory);
+        using var provider = App.ConfigureServices(settings, logging, appPaths,
+            services =>
+            {
+                services.AddSingleton<IChangelogContentFetcher>(stubFetcher);
+                services.AddSingleton<IDotNetPackageService>(new DotNetPackageService(
+                    stubFetcher,
+                    appPaths,
+                    () => [new DotNetStandaloneBundle(DotNetPackageKind.Sdk, "10.0.102", "Microsoft .NET SDK 10.0.102 (x64)")],
+                    () => @"C:\Program Files\dotnet\dotnet.exe"));
+            });
         var window = provider.GetRequiredService<MainWindow>();
         var shell = window.ViewModel;
         var viewModel = shell.Updates;
@@ -863,9 +873,10 @@ internal static partial class Program
         File.Delete(Path.Combine(output, "missing"));
         File.Delete(Path.Combine(output, "error-result"));
         File.WriteAllText(fixture, """
-                                   param($Vendor, $LogPath, $Action, $OnlyStage, [switch]$CheckOnly)
+                                   param($Vendor, $LogPath, $Action, $OnlyStage, [switch]$CheckOnly, $DotNetPackageKind = '', $DotNetChannel = '', $DotNetVersion = '', [switch]$IncludePrerelease)
                                    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-                                   Add-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.txt') -Value "$Action|$OnlyStage|$CheckOnly"
+                                   if ($DotNetPackageKind) { Add-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.txt') -Value "$Action|$OnlyStage|$CheckOnly|$DotNetPackageKind|$DotNetChannel|$DotNetVersion|$IncludePrerelease" }
+                                   else { Add-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.txt') -Value "$Action|$OnlyStage|$CheckOnly" }
                                    Write-Output "[12:34:56] === $OnlyStage ==="
                                    if (Test-Path (Join-Path $PSScriptRoot 'fail')) { exit 5 }
                                    if (Test-Path (Join-Path $PSScriptRoot 'missing')) { exit 0 }
@@ -929,6 +940,26 @@ internal static partial class Program
         Await(viewModel.RunUpdaterAsync(stage, "Update", true));
         Check(stage.Status == "Ошибка проверки" && viewModel.OverallStatusText.Contains("Ошибок проверки: 1"), "Check completion overwrote its failure result");
         File.Delete(Path.Combine(output, "error-result"));
+        File.WriteAllText(calls, "");
+        var net11Row = shell.DotNet.Channels.Single(ch => ch.Info.Channel == "11.0").Packages.Single(pkg => pkg.Entry.Kind == DotNetPackageKind.Sdk);
+        Await(net11Row.PrimaryActionCommand.ExecuteAsync(null));
+        Check(File.ReadAllLines(calls).SequenceEqual(["Install|.NET SDK 10|False|Sdk|11.0|11.0.101|False"]), ".NET 11 SDK install dispatch passed wrong arguments");
+        File.WriteAllText(calls, "");
+        var net10Row = shell.DotNet.Channels.Single(ch => ch.Info.Channel == "10.0").Packages.Single(pkg => pkg.Entry.Kind == DotNetPackageKind.Sdk);
+        var removableInstance = net10Row.Entry.InstalledInstances.Single(inst => inst.CanUninstall);
+        var uninstallTask = shell.DotNet.ConfirmAndUninstallAsync(DotNetPackageKind.Sdk, removableInstance);
+        visualHost.Settle();
+        var deleteDialog = (MessageDialogViewModel)Descendants<MessageDialogView>(window).Single(view => view.IsVisible).DataContext;
+        deleteDialog.TryAccept();
+        Await(uninstallTask);
+        Check(File.ReadAllLines(calls).Length == 0, "Pressing Enter on .NET uninstall confirmation did not cancel");
+        var confirmedUninstall = shell.DotNet.ConfirmAndUninstallAsync(DotNetPackageKind.Sdk, removableInstance);
+        visualHost.Settle();
+        var acceptedDialog = (MessageDialogViewModel)Descendants<MessageDialogView>(window).Single(view => view.IsVisible).DataContext;
+        acceptedDialog.AcceptCommand.Execute(null);
+        Await(confirmedUninstall);
+        Check(File.ReadAllLines(calls).SequenceEqual(["Uninstall|.NET SDK 10|False|Sdk|10.0|10.0.102|False"]), "Confirmed .NET SDK uninstall did not dispatch exact version");
+        Console.WriteLine("PASS: .NET 11/10/12/8 catalog, standalone vs VS ownership, install dispatch and safe uninstall confirmation");
         Console.WriteLine("PASS: independent states, selection, chunked JSON, vendor guard, malformed payload, persistence, two WPF widths, selected dispatch, post-update check, failure isolation, stop running/queued cards");
         var darkOutput = Path.Combine(Path.GetDirectoryName(output)!, "dark-controls");
         Directory.CreateDirectory(darkOutput);
@@ -942,7 +973,102 @@ internal static partial class Program
         Console.WriteLine("PASS: binding sensor self-test and zero binding errors in the shared application graph");
     }
 
-    private sealed class StubChangelogContentFetcher(IReadOnlyDictionary<string, string> responses) : IChangelogContentFetcher
+    private static StubChangelogContentFetcher CreateDotNetStubFetcher() => new(
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [DotNetPackageService.ReleasesIndexUrl] = """
+                {
+                  "releases-index": [
+                    { "channel-version": "12.0", "latest-release": "12.0.0-preview.2", "latest-sdk": "12.0.100-preview.2.26150.4", "latest-runtime": "12.0.0-preview.2.26149.1", "release-type": "sts", "support-phase": "preview", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/12.0/releases.json" },
+                    { "channel-version": "11.0", "latest-release": "11.0.1", "latest-sdk": "11.0.101", "latest-runtime": "11.0.1", "release-type": "sts", "support-phase": "active", "eol-date": "2028-05-14", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/11.0/releases.json" },
+                    { "channel-version": "10.0", "latest-release": "10.0.5", "latest-sdk": "10.0.303", "latest-runtime": "10.0.5", "release-type": "lts", "support-phase": "active", "eol-date": "2028-11-14", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json" },
+                    { "channel-version": "8.0", "latest-release": "8.0.25", "latest-sdk": "8.0.419", "latest-runtime": "8.0.25", "release-type": "lts", "support-phase": "eol", "eol-date": "2026-11-10", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/8.0/releases.json" }
+                  ]
+                }
+                """,
+            ["https://builds.dotnet.microsoft.com/dotnet/release-metadata/12.0/releases.json"] = """
+                {
+                  "channel-version": "12.0",
+                  "release-type": "sts",
+                  "support-phase": "preview",
+                  "latest-release": "12.0.0-preview.2",
+                  "latest-sdk": "12.0.100-preview.2.26150.4",
+                  "latest-runtime": "12.0.0-preview.2.26149.1",
+                  "releases": [
+                    {
+                      "sdks": [{ "version": "12.0.100-preview.2.26150.4" }],
+                      "runtime": { "version": "12.0.0-preview.2.26149.1" },
+                      "windowsdesktop": { "version": "12.0.0-preview.2.26149.1" },
+                      "aspnetcore-runtime": { "version": "12.0.0-preview.2.26149.1" }
+                    }
+                  ]
+                }
+                """,
+            ["https://builds.dotnet.microsoft.com/dotnet/release-metadata/11.0/releases.json"] = """
+                {
+                  "channel-version": "11.0",
+                  "release-type": "sts",
+                  "support-phase": "active",
+                  "latest-release": "11.0.1",
+                  "latest-sdk": "11.0.101",
+                  "latest-runtime": "11.0.1",
+                  "eol-date": "2028-05-14",
+                  "releases": [
+                    {
+                      "sdks": [{ "version": "11.0.101" }],
+                      "runtime": { "version": "11.0.1" },
+                      "windowsdesktop": { "version": "11.0.1" },
+                      "aspnetcore-runtime": { "version": "11.0.1" }
+                    }
+                  ]
+                }
+                """,
+            ["https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json"] = """
+                {
+                  "channel-version": "10.0",
+                  "release-type": "lts",
+                  "support-phase": "active",
+                  "latest-release": "10.0.5",
+                  "latest-sdk": "10.0.303",
+                  "latest-runtime": "10.0.5",
+                  "eol-date": "2028-11-14",
+                  "releases": [
+                    {
+                      "sdks": [{ "version": "10.0.303" }, { "version": "10.0.114" }],
+                      "runtime": { "version": "10.0.5" },
+                      "windowsdesktop": { "version": "10.0.5" },
+                      "aspnetcore-runtime": { "version": "10.0.5" }
+                    }
+                  ]
+                }
+                """,
+            ["https://builds.dotnet.microsoft.com/dotnet/release-metadata/8.0/releases.json"] = """
+                {
+                  "channel-version": "8.0",
+                  "release-type": "lts",
+                  "support-phase": "eol",
+                  "latest-release": "8.0.25",
+                  "latest-sdk": "8.0.419",
+                  "latest-runtime": "8.0.25",
+                  "eol-date": "2026-11-10",
+                  "releases": [
+                    {
+                      "sdks": [{ "version": "8.0.419" }, { "version": "8.0.320" }],
+                      "runtime": { "version": "8.0.25" },
+                      "windowsdesktop": { "version": "8.0.25" },
+                      "aspnetcore-runtime": { "version": "8.0.25" }
+                    }
+                  ]
+                }
+                """,
+        },
+        sdkListOutput: "10.0.102 [C:\\Program Files\\dotnet\\sdk]\n10.0.302 [C:\\Program Files\\dotnet\\sdk]\n8.0.301 [C:\\Program Files\\dotnet\\sdk]\n",
+        runtimeListOutput: "Microsoft.NETCore.App 10.0.3 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\nMicrosoft.WindowsDesktop.App 10.0.3 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\nMicrosoft.AspNetCore.App 10.0.3 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\n");
+
+    private sealed class StubChangelogContentFetcher(
+        IReadOnlyDictionary<string, string> responses,
+        string sdkListOutput = "",
+        string runtimeListOutput = "") : IChangelogContentFetcher
     {
         public Task<string> FetchAsync(ChangelogSource source, CancellationToken cancellationToken) =>
             DownloadUrlAsync(source.DownloadUrl ?? "", cancellationToken);
@@ -961,6 +1087,10 @@ internal static partial class Program
         public string? FindAgyExecutable() => null;
 
         public Task<string> RunCommandAsync(string executable, IReadOnlyList<string> arguments, int timeoutSeconds, CancellationToken cancellationToken) =>
-            Task.FromResult("");
+            arguments.Count > 0 && arguments[0] == "--list-sdks"
+                ? Task.FromResult(sdkListOutput)
+                : arguments.Count > 0 && arguments[0] == "--list-runtimes"
+                    ? Task.FromResult(runtimeListOutput)
+                    : Task.FromResult("");
     }
 }

@@ -49,6 +49,28 @@ public sealed class PowerShellProcessRunner : IUpdaterProcessRunner
             process.StartInfo.ArgumentList.Add(request.OnlyStageId);
         }
 
+        if (!string.IsNullOrWhiteSpace(request.DotNetPackageKind))
+        {
+            process.StartInfo.ArgumentList.Add("-DotNetPackageKind");
+            process.StartInfo.ArgumentList.Add(request.DotNetPackageKind);
+            if (!string.IsNullOrWhiteSpace(request.DotNetChannel))
+            {
+                process.StartInfo.ArgumentList.Add("-DotNetChannel");
+                process.StartInfo.ArgumentList.Add(request.DotNetChannel);
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.DotNetVersion))
+            {
+                process.StartInfo.ArgumentList.Add("-DotNetVersion");
+                process.StartInfo.ArgumentList.Add(request.DotNetVersion);
+            }
+
+            if (request.IncludePrerelease)
+            {
+                process.StartInfo.ArgumentList.Add("-IncludePrerelease");
+            }
+        }
+
         process.Start();
         await using var registration = cancellationToken.Register(() =>
         {

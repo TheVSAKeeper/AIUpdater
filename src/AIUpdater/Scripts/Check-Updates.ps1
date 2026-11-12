@@ -296,7 +296,7 @@ function Invoke-CheckStage
                 $sdks = @(Get-DevelopmentSdkVersions)
                 if (-not $sdks.Count)
                 {
-                    Write-CheckResult $Stage 'NOT_INSTALLED' '.NET SDK 10 is not installed'
+                    Write-CheckResult $Stage 'NOT_INSTALLED' '.NET SDK is not installed'
                     return
                 }
                 $installed = $sdks | Sort-Object { [version]$_ } -Descending | Select-Object -First 1

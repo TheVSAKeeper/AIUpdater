@@ -10,4 +10,5 @@ public sealed record AppPaths(string DataDirectory, string ScriptDirectory)
     public string LogsDirectory => Path.Combine(DataDirectory, "Logs");
     public string ResultsFile => Path.Combine(LogsDirectory, "LastResults.json");
     public string ChangelogDirectory => Path.Combine(DataDirectory, "Changelogs");
+    public string DotNetMetadataDirectory => Path.Combine(DataDirectory, "DotNetMetadata");
 }

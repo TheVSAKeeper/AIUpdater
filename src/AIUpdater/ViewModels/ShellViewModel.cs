@@ -13,22 +13,24 @@ public sealed class ShellViewModel : ShellViewModelBase, IAppNavigator, IDisposa
     private readonly NavigationItem _settingsItem;
     private readonly IUpdaterDialogs _dialogs;
 
-    public ShellViewModel(MainViewModel updates, ChangelogViewModel changelog, SettingsViewModel settings,
+    public ShellViewModel(MainViewModel updates, DotNetViewModel dotnet, ChangelogViewModel changelog, SettingsViewModel settings,
         ModalHostViewModel modal, ToastHostViewModel toasts, ShellPreferences preferences,
         AppNavigator navigator, IUpdaterDialogs dialogs) : base(modal)
     {
         Updates = updates;
+        DotNet = dotnet;
         Changelog = changelog;
         SettingsPage = settings;
         Toasts = toasts;
         Preferences = preferences;
         _dialogs = dialogs;
         var updatesItem = new NavigationItem("Обновления", PackIconLucideKind.RefreshCw, updates, key: SectionKey.Updates) { KeepAlive = true };
+        var dotnetItem = new NavigationItem(".NET", PackIconLucideKind.Layers, dotnet, key: SectionKey.DotNet) { KeepAlive = true };
         var changelogItem = new NavigationItem("Что нового", PackIconLucideKind.Newspaper, changelog, key: SectionKey.Changelog) { KeepAlive = true };
         var logsItem = new NavigationItem("Журнал", PackIconLucideKind.ScrollText, updates.LogPanel, key: SectionKey.Logs) { KeepAlive = true, StartsGroup = true };
         _settingsItem = new("Настройки", PackIconLucideKind.Settings, settings, key: SectionKey.Settings) { KeepAlive = true };
-        foreach (var item in new[] { updatesItem, changelogItem, logsItem }) Sections.Add(item);
-        _pages = new[] { updatesItem, changelogItem, logsItem, _settingsItem }.ToDictionary(item => item.Key, StringComparer.Ordinal);
+        foreach (var item in new[] { updatesItem, dotnetItem, changelogItem, logsItem }) Sections.Add(item);
+        _pages = new[] { updatesItem, dotnetItem, changelogItem, logsItem, _settingsItem }.ToDictionary(item => item.Key, StringComparer.Ordinal);
         navigator.Attach(this);
         IsNavCollapsed = Preferences.NavCollapsed;
         Preferences.PropertyChanged += OnPreferencesChanged;
@@ -37,6 +39,7 @@ public sealed class ShellViewModel : ShellViewModelBase, IAppNavigator, IDisposa
     }
 
     public MainViewModel Updates { get; }
+    public DotNetViewModel DotNet { get; }
     public ChangelogViewModel Changelog { get; }
     public SettingsViewModel SettingsPage { get; }
     public ToastHostViewModel Toasts { get; }
@@ -52,6 +55,8 @@ public sealed class ShellViewModel : ShellViewModelBase, IAppNavigator, IDisposa
         Selected = page;
         return true;
     }
+
+    public void ShowDotNet() => Navigate(SectionKey.DotNet);
 
     public void ShowChangelog(UpdateStage? stage = null)
     {

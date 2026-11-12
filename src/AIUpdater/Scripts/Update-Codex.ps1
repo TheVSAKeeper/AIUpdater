@@ -4,11 +4,20 @@
     [switch]$CheckOnly,
     [ValidateSet('Update', 'Install', 'Uninstall')]
     [string]$Action = 'Update',
-    [string]$LogPath = (Join-Path $PSScriptRoot 'Update-Codex-last.log')
+    [string]$LogPath = (Join-Path $PSScriptRoot 'Update-Codex-last.log'),
+    [ValidateSet('', 'Sdk', 'DesktopRuntime', 'AspNetCoreRuntime', 'Runtime')]
+    [string]$DotNetPackageKind = '',
+    [string]$DotNetChannel = '',
+    [string]$DotNetVersion = '',
+    [switch]$IncludePrerelease
 )
 
 $ErrorActionPreference = 'Stop'
-if ($Action -ne 'Update' -and (-not $OnlyStage -or $CheckOnly))
+if ($DotNetPackageKind -and $CheckOnly)
+{
+    throw 'DotNetPackageKind cannot be combined with CheckOnly'
+}
+if ($Action -ne 'Update' -and (-not $OnlyStage -and -not $DotNetPackageKind -or $CheckOnly))
 {
     throw 'Install and Uninstall require OnlyStage and cannot be combined with CheckOnly'
 }
@@ -1493,7 +1502,11 @@ function Invoke-UpdaterMain
         [string]$Vendor = '',
         [switch]$CheckOnly,
         [string]$Action = 'Update',
-        [switch]$NoExit
+        [switch]$NoExit,
+        [string]$DotNetPackageKind = '',
+        [string]$DotNetChannel = '',
+        [string]$DotNetVersion = '',
+        [switch]$IncludePrerelease
     )
 
     $script:CheckOnly = [bool]$CheckOnly
@@ -1509,6 +1522,28 @@ function Invoke-UpdaterMain
         $script:HadFailure = $false
         $script:FailureCount = 0
 
+        if ($DotNetPackageKind)
+        {
+            $stepLabel = ".NET $DotNetPackageKind $DotNetChannel $(if ($DotNetVersion) { $DotNetVersion })".Trim()
+            Invoke-UpdateStep -Name $stepLabel -ScriptBlock {
+                Invoke-DotNetPackageOperation `
+                    -Action $Action `
+                    -Kind $DotNetPackageKind `
+                    -Channel $DotNetChannel `
+                    -Version $DotNetVersion `
+                    -IncludePrerelease:$IncludePrerelease
+            }
+            try
+            {
+                Invoke-CheckStage '.NET SDK 10'
+            }
+            catch
+            {
+                Write-Log "Post-action .NET SDK check failed: $( $_.Exception.Message )"
+            }
+        }
+        else
+        {
         foreach ($entry in (Get-StageDefinitions).GetEnumerator())
         {
             $stageName = $entry.Key
@@ -1550,6 +1585,7 @@ function Invoke-UpdaterMain
                     }
                 }
             }
+        }
         }
 
         if ($script:HadFailure)
@@ -1617,6 +1653,18 @@ if ($MyInvocation.InvocationName -ne '.')
         {
             $arguments += @('-Vendor', "`"$Vendor`"")
         }
+        if ($DotNetPackageKind)
+        {
+            $arguments += @('-DotNetPackageKind', $DotNetPackageKind, '-DotNetChannel', "`"$DotNetChannel`"")
+            if ($DotNetVersion)
+            {
+                $arguments += @('-DotNetVersion', "`"$DotNetVersion`"")
+            }
+            if ($IncludePrerelease)
+            {
+                $arguments += '-IncludePrerelease'
+            }
+        }
         $arguments += @('-Action', $Action)
         $arguments += @('-LogPath', "`"$LogPath`"")
         Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden
@@ -1624,5 +1672,13 @@ if ($MyInvocation.InvocationName -ne '.')
     }
 
     Set-Content -LiteralPath $logPath -Encoding UTF8 -Value "Codex update run: $( Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz' )"
-    Invoke-UpdaterMain -OnlyStage $OnlyStage -Vendor $Vendor -CheckOnly:$CheckOnly -Action $Action
+    Invoke-UpdaterMain `
+        -OnlyStage $OnlyStage `
+        -Vendor $Vendor `
+        -CheckOnly:$CheckOnly `
+        -Action $Action `
+        -DotNetPackageKind $DotNetPackageKind `
+        -DotNetChannel $DotNetChannel `
+        -DotNetVersion $DotNetVersion `
+        -IncludePrerelease:$IncludePrerelease
 }

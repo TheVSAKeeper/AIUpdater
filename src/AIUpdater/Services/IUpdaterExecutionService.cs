@@ -76,4 +76,12 @@ public interface IUpdaterExecutionService
         Func<bool> isStopRequested,
         Action<string, string?> appendLine,
         CancellationToken cancellationToken);
+
+    Task<(int ExitCode, bool SawError)> ExecuteDotNetOperationAsync(
+        IReadOnlyList<UpdateStage> allStages,
+        IReadOnlyList<VendorStatus> vendors,
+        DotNetOperationRequest operation,
+        Func<bool> isStopRequested,
+        Action<string, string?> appendLine,
+        CancellationToken cancellationToken);
 }
