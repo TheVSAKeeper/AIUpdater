@@ -29,6 +29,26 @@ public partial class DotNetPackageRowView : UserControl, IView<DotNetPackageRowV
             Command = row.InstallLatestCommand,
             IsEnabled = row.CanInstallLatest && row.CanInteract,
         });
+        if (row.HasInstallVersionMenu)
+        {
+            var versionsMenu = new MenuItem
+            {
+                Header = "Установить версию",
+                IsEnabled = row.CanInteract && row.InstallOptions.Any(option => option.IsEnabled),
+            };
+            foreach (var option in row.InstallOptions)
+            {
+                versionsMenu.Items.Add(new MenuItem
+                {
+                    Header = option.Header,
+                    Command = option.Command,
+                    IsEnabled = option.IsEnabled && row.CanInteract,
+                });
+            }
+
+            RowMenu.Items.Add(versionsMenu);
+        }
+
         RowMenu.Items.Add(new MenuItem
         {
             Header = "Обновить",

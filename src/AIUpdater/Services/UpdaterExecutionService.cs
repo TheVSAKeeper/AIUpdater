@@ -369,7 +369,10 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
 
         requestedStage?.SetRunning(operationState);
         vendorStatus.SetStatus(operationName, operation.DisplayLabel, AccentTextBrush);
-        var run = new VendorRun(vendor, runStages);
+        var run = new VendorRun(vendor, runStages)
+        {
+            ActiveStage = requestedStage,
+        };
         var temporaryLog = Path.Combine(Path.GetTempPath(), $"AIUpdater-{Guid.NewGuid():N}.log");
         var request = new UpdaterProcessRequest(
             ScriptPath,

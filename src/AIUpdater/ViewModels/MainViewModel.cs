@@ -63,6 +63,7 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
             {
                 if (e.PropertyName != nameof(VendorStatus.Detail)) return;
                 OnPropertyChanged(nameof(ActiveOperationText));
+                OnPropertyChanged(nameof(StatusCaption));
                 foreach (var card in cards) card.RefreshOperationDetail();
             };
             Vendors.Add(status);
@@ -98,7 +99,7 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
     } = "Готов к работе";
     public string PageTitle => "Обновления";
     public string PageDescription => "Проверка и обновление инструментов";
-    public string StatusCaption => IsRunning ? ProgressCaption : OverallStatusText;
+    public string StatusCaption => IsRunning ? BuildRunningStatusCaption() : OverallStatusText;
     public bool IsBusy => IsRunning;
     public bool IsIndeterminate => false;
     public int RunTotal => _runStages.Length;
@@ -158,6 +159,39 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
     {
         foreach (var property in new[] { nameof(RunTotal), nameof(QueuedCount), nameof(ActiveCount), nameof(CompletedCount), nameof(ProgressValue), nameof(ProgressMax), nameof(ProgressCaption), nameof(ActiveOperationText), nameof(StatusCaption), nameof(OperationTitle) })
             OnPropertyChanged(property);
+    }
+
+    private string BuildRunningStatusCaption()
+    {
+        if (RunTotal != 1)
+        {
+            return ProgressCaption;
+        }
+
+        var stage = _runStages[0];
+        if (!stage.IsActiveOperation || stage.OperationState == OperationState.Queued)
+        {
+            return ProgressCaption;
+        }
+
+        var rawDetail = Vendors.FirstOrDefault(vendor => vendor.Name == stage.Vendor)?.Detail;
+        if (string.IsNullOrWhiteSpace(rawDetail))
+        {
+            return OverallStatusText;
+        }
+
+        var singleLine = rawDetail.Replace("\r", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal).Trim();
+        if (singleLine.StartsWith(stage.Name, StringComparison.Ordinal))
+        {
+            singleLine = singleLine[stage.Name.Length..].TrimStart(' ', ':', '·');
+        }
+
+        if (singleLine.Length == 0 || string.Equals(singleLine, OverallStatusText, StringComparison.Ordinal))
+        {
+            return OverallStatusText;
+        }
+
+        return $"{OverallStatusText} · {singleLine}";
     }
 
     public static string CheckSummary(IEnumerable<UpdateStage> stages) => UpdaterOutputParser.BuildCheckSummary(stages);

@@ -30,9 +30,17 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
-                <TextBlock x:Name="BusyTitleTextBlock" Text="{Binding BusyTitle}" FontWeight="SemiBold"
-                           Foreground="{DynamicResource Accent.Text}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                           Visibility="{Binding IsBusy, Converter={StaticResource BoolVisibility}}" />
+                <DockPanel Visibility="{Binding IsBusy, Converter={StaticResource BoolVisibility}}">
+                    <TextBlock x:Name="BusyPercentTextBlock" DockPanel.Dock="Right" Text="{Binding OperationPercentText}"
+                               FontWeight="SemiBold" Foreground="{DynamicResource Accent.Text}" Margin="10,0,0,0"
+                               Visibility="{Binding HasOperationPercent, Converter={StaticResource BoolVisibility}}" />
+                    <TextBlock x:Name="BusyTitleTextBlock" Text="{Binding BusyTitle}" FontWeight="SemiBold"
+                               Foreground="{DynamicResource Accent.Text}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+                <TextBlock x:Name="BusyDetailTextBlock" Text="{Binding OperationDetail}"
+                           FontSize="{DynamicResource Font.Size.XS}" Foreground="{DynamicResource Fg.Secondary}" Margin="0,2,0,0"
+                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding OperationDetail}"
+                           Visibility="{Binding HasOperationDetail, Converter={StaticResource BoolVisibility}}" />
             </StackPanel>
         </DockPanel>
         <WrapPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
@@ -41,14 +49,16 @@
                       ToolTip="Показывать preview и RC-сборки внутри активных веток .NET" />
             <CheckBox x:Name="EolToggle" Content="Устаревшие ветки (EOL)" IsChecked="{Binding ShowEol}"
                       Margin="0,0,16,4"
-                      ToolTip="Показывать ветки .NET с завершённым сроком официальной поддержки" />
+                      ToolTip="Показывать ветки .NET и .NET Core с завершённым сроком официальной поддержки" />
             <CheckBox x:Name="InstalledOnlyToggle" Content="Только установленные" IsChecked="{Binding InstalledOnly}"
                       Margin="0,0,0,4"
                       ToolTip="Оставить только локально установленные пакеты SDK и Runtime" />
         </WrapPanel>
         <Border x:Name="BusyProgressPanel" Grid.Row="2" Margin="0,0,0,10"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolVisibility}}">
-            <ProgressBar IsIndeterminate="True" Height="3" MinHeight="0" />
+            <ProgressBar x:Name="BusyProgressBar" IsIndeterminate="{Binding IsOperationIndeterminate}"
+                         Minimum="0" Maximum="100" Value="{Binding OperationProgressValue, Mode=OneWay}"
+                         Height="4" MinHeight="0" />
         </Border>
         <Border x:Name="WarningBanner" Grid.Row="3" Background="{DynamicResource State.WarningSoft}"
                 BorderBrush="{DynamicResource Border.Subtle}" BorderThickness="1" CornerRadius="6"

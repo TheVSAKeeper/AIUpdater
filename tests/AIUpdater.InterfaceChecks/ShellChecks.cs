@@ -201,7 +201,13 @@ internal static partial class Program
             host.Settle();
             var dotNetView = Descendants<DotNetView>(window).Single();
             Check(dotNetView.IsVisible && ReferenceEquals(dotNetView.DataContext, shell.DotNet), "General .NET card action did not navigate to the .NET manager section");
-            Check(shell.DotNet.Channels.Select(ch => ch.Info.Channel).SequenceEqual(["11.0", "10.0", "12.0"]), "Active and preview .NET channels were not ordered or EOL leaked in by default");
+            Check(shell.DotNet.Channels.Select(ch => ch.Info.Channel).SequenceEqual(["11.0", "10.0", "12.0", "8.0", "9.0", "3.1", "2.1"]),
+                "All .NET and .NET Core channels (Active, Preview, Installed EOL, Uninstalled EOL) were not visible by default");
+            var core31Channel = shell.DotNet.Channels.Single(ch => ch.Info.Channel == "3.1");
+            Check(core31Channel.Title == ".NET Core 3.1" && core31Channel.BadgeText == "EOL", ".NET Core 3.1 channel title or badge is malformed");
+            var core21Channel = shell.DotNet.Channels.Single(ch => ch.Info.Channel == "2.1");
+            Check(core21Channel.Packages.All(pkg => pkg.Entry.Kind != AIUpdater.Models.DotNetPackageKind.DesktopRuntime) && core21Channel.Packages.Count == 3,
+                ".NET Core 2.1 included a nonexistent Windows Desktop Runtime row");
             var net11Sdk = shell.DotNet.Channels.Single(ch => ch.Info.Channel == "11.0").Packages.Single(pkg => pkg.Entry.Kind == AIUpdater.Models.DotNetPackageKind.Sdk);
             Check(net11Sdk.AvailableText == "11.0.101" && net11Sdk.PrimaryActionText == "Установить" && net11Sdk.CanInstallPrimary, ".NET 11 SDK install action is missing");
             var net10RowView = Descendants<DotNetPackageRowView>(dotNetView)
@@ -213,16 +219,21 @@ internal static partial class Program
             Check(menuItems.Any(mi => mi.Header?.ToString()?.Contains("10.0.102") == true && mi.IsEnabled)
                   && menuItems.Any(mi => mi.Header?.ToString()?.Contains("10.0.302") == true && !mi.IsEnabled),
                 "Standalone vs Visual Studio ownership was not reflected in uninstall menu items");
+            var versionSubMenu = menuItems.SingleOrDefault(mi => Equals(mi.Header, "Установить версию"));
+            Check(versionSubMenu is not null && versionSubMenu.Items.OfType<MenuItem>().Any(sub => sub.Header?.ToString()?.Contains("линейка 10.0.1xx") == true),
+                "Per-feature-band SDK version selector submenu is missing");
             net10Menu.IsOpen = false;
             var eolToggle = (CheckBox)dotNetView.FindName("EolToggle");
+            eolToggle.SetCurrentValue(ToggleButton.IsCheckedProperty, false);
+            host.Settle();
+            Check(shell.DotNet.Channels.Select(ch => ch.Info.Channel).SequenceEqual(["11.0", "10.0", "12.0"]), "Unchecking EOL toggle did not hide EOL branches");
             eolToggle.SetCurrentValue(ToggleButton.IsCheckedProperty, true);
             host.Settle();
-            Check(shell.DotNet.Channels.Any(ch => ch.Info.Channel == "8.0" && ch.BadgeText == "EOL"), "EOL toggle did not reveal .NET 8 EOL branch");
-            eolToggle.SetCurrentValue(ToggleButton.IsCheckedProperty, false);
+            Check(shell.DotNet.Channels.Any(ch => ch.Info.Channel == "8.0" && ch.BadgeText == "EOL"), "EOL toggle did not restore .NET 8 EOL branch");
             var installedOnlyToggle = (CheckBox)dotNetView.FindName("InstalledOnlyToggle");
             installedOnlyToggle.SetCurrentValue(ToggleButton.IsCheckedProperty, true);
             host.Settle();
-            Check(shell.DotNet.Channels.Select(ch => ch.Info.Channel).SequenceEqual(["10.0"]), "Installed-only toggle did not filter uninstalled .NET channels");
+            Check(shell.DotNet.Channels.Select(ch => ch.Info.Channel).SequenceEqual(["10.0", "8.0"]), "Installed-only toggle did not keep all locally installed channels (10.0 and 8.0)");
             installedOnlyToggle.SetCurrentValue(ToggleButton.IsCheckedProperty, false);
             host.Settle();
             Check(Descendants<ScrollViewer>(dotNetView).All(viewer => viewer.ExtentWidth <= viewer.ViewportWidth + 1 && viewer.ScrollableWidth <= 1),

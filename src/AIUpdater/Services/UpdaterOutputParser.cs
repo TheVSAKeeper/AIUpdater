@@ -128,6 +128,21 @@ public sealed class UpdaterOutputParser
             return;
         }
 
+        var progressPayload = Regex.Match(trimmed, @"^(?:\[\d{2}:\d{2}:\d{2}\]\s+)?UI_PROGRESS\s+(?<detail>.+)$");
+        if (progressPayload.Success)
+        {
+            if (vendorStatus is not null)
+            {
+                var detail = progressPayload.Groups["detail"].Value.Trim();
+                var stageName = run.ActiveStage?.Name;
+                vendorStatus.Detail = string.IsNullOrWhiteSpace(stageName) || detail.StartsWith(stageName, StringComparison.Ordinal)
+                    ? detail
+                    : $"{stageName}: {detail}";
+            }
+
+            return;
+        }
+
         var progressMatch = Regex.Match(trimmed, @"(?<percent>\d{1,3})%");
         if (progressMatch.Success && (trimmed.Contains('█') || trimmed.Contains('▒')))
         {

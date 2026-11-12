@@ -85,8 +85,11 @@ public sealed record DotNetPackageEntry(
     string? AvailableVersion,
     string? LatestChannelVersion,
     bool HasUpdate,
-    IReadOnlyList<DotNetSdkBandPlan> SdkBands)
+    IReadOnlyList<DotNetSdkBandPlan> SdkBands,
+    IReadOnlyList<string>? InstallableVersions = null)
 {
+    public IReadOnlyList<string> SelectableVersions => InstallableVersions ?? [];
+
     public bool IsInstalled => InstalledInstances.Count > 0;
 
     public string? HighestInstalledVersion => InstalledInstances.Count > 0 ? InstalledInstances[0].Version : null;
@@ -145,7 +148,23 @@ public sealed record DotNetChannelInfo(
 
     public bool HasUpdates => Packages.Any(package => package.HasUpdate);
 
-    public string DisplayTitle => $".NET {Channel.Split('.')[0]}";
+    public string DisplayTitle => FormatChannelTitle(Channel);
+
+    public static string FormatChannelTitle(string channel)
+    {
+        var majorPart = channel.Split('.')[0];
+        return int.TryParse(majorPart, out var major) && major is >= 1 and < 5
+            ? $".NET Core {channel}"
+            : $".NET {majorPart}";
+    }
+
+    public static string FormatChannelTag(string channel)
+    {
+        var majorPart = channel.Split('.')[0];
+        return int.TryParse(majorPart, out var major) && major is >= 1 and < 5
+            ? $".NET Core {channel}"
+            : $".NET {channel}";
+    }
 
     public string BadgeText => SupportPhase switch
     {
@@ -220,7 +239,7 @@ public sealed record DotNetOperationRequest(
                 DotNetActionKind.Uninstall => "Удаление",
                 _ => "Операция",
             };
-            var suffix = string.IsNullOrWhiteSpace(Version) ? $"(.NET {Channel})" : $"{Version}";
+            var suffix = string.IsNullOrWhiteSpace(Version) ? $"({DotNetChannelInfo.FormatChannelTag(Channel)})" : $"{Version}";
             return $"{verb}: {DotNetPackageEntry.GetTitle(Kind)} {suffix}";
         }
     }

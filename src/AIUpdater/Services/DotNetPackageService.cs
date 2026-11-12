@@ -87,17 +87,44 @@ public sealed class DotNetPackageService : IDotNetPackageService
         }
 
         var indexEntries = indexJson is not null ? ParseReleasesIndex(indexJson) : [];
-        var allChannelNames = indexEntries.Select(entry => entry.Channel)
-            .Concat(installedSdks.Select(DotNetVersionComparer.TryGetChannel).OfType<string>())
+        var localChannels = installedSdks.Select(DotNetVersionComparer.TryGetChannel).OfType<string>()
             .Concat(installedRuntimes.Select(rt => DotNetVersionComparer.TryGetChannel(rt.Version)).OfType<string>())
+            .ToHashSet(StringComparer.Ordinal);
+
+        var allChannelNames = indexEntries.Select(entry => entry.Channel).Where(IsSupportedDisplayChannel)
+            .Concat(localChannels)
             .Distinct(StringComparer.Ordinal)
-            .Where(IsSupportedDisplayChannel)
             .OrderByDescending(ParseChannelSortKey)
             .ToArray();
 
         var indexByChannel = indexEntries.ToDictionary(entry => entry.Channel, StringComparer.Ordinal);
-        var channels = new List<DotNetChannelInfo>(allChannelNames.Length);
+        using var gate = new SemaphoreSlim(4);
+        var detailTasks = allChannelNames.ToDictionary(
+            channelName => channelName,
+            async channelName =>
+            {
+                if (!indexByChannel.TryGetValue(channelName, out var meta)
+                    || meta.ReleasesJsonUrl is not { } detailUrl
+                    || !IsTrustedMetadataUrl(detailUrl))
+                {
+                    return (ChannelReleaseDetail?)null;
+                }
 
+                await gate.WaitAsync(cancellationToken);
+                try
+                {
+                    return await TryLoadChannelDetailAsync(channelName, detailUrl, forceRefresh, cancellationToken);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            },
+            StringComparer.Ordinal);
+
+        await Task.WhenAll(detailTasks.Values);
+
+        var channels = new List<DotNetChannelInfo>(allChannelNames.Length);
         foreach (var channelName in allChannelNames)
         {
             indexByChannel.TryGetValue(channelName, out var meta);
@@ -106,32 +133,22 @@ public sealed class DotNetPackageService : IDotNetPackageService
                 .OrderByDescending(ver => ver, DotNetVersionComparer.Instance)
                 .ToArray();
 
-            var needChannelDetail = meta is not null && (
-                meta.SupportPhase != DotNetSupportPhase.Eol
-                || channelSdks.Length > 0
-                || installedRuntimes.Any(rt => string.Equals(DotNetVersionComparer.TryGetChannel(rt.Version), channelName, StringComparison.Ordinal)));
-
-            ChannelReleaseDetail? detail = null;
-            if (needChannelDetail && meta?.ReleasesJsonUrl is { } detailUrl && IsTrustedMetadataUrl(detailUrl))
-            {
-                detail = await TryLoadChannelDetailAsync(channelName, detailUrl, forceRefresh, cancellationToken);
-            }
-
+            var detail = await detailTasks[channelName];
             channels.Add(BuildChannelInfo(channelName, meta, detail, channelSdks, installedRuntimes, bundles, includePrerelease));
         }
 
         var ordered = channels
-            .OrderBy(ch => GetPhaseSortPriority(ch.SupportPhase))
+            .OrderBy(GetChannelSortPriority)
             .ThenByDescending(ch => ParseChannelSortKey(ch.Channel))
             .ToArray();
         return new DotNetCatalogSnapshot(ordered, DateTimeOffset.Now, offlineFallback, warning);
     }
 
-    private static int GetPhaseSortPriority(DotNetSupportPhase phase) => phase switch
+    private static int GetChannelSortPriority(DotNetChannelInfo channel) => channel.SupportPhase switch
     {
         DotNetSupportPhase.Active or DotNetSupportPhase.GoLive or DotNetSupportPhase.Maintenance => 0,
         DotNetSupportPhase.Preview => 1,
-        DotNetSupportPhase.Eol => 2,
+        DotNetSupportPhase.Eol => channel.HasInstalledPackages ? 2 : 3,
         _ => 1,
     };
 
@@ -143,10 +160,10 @@ public sealed class DotNetPackageService : IDotNetPackageService
         }
 
         var archLabel = RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "arm64" : "x64";
-        var sdkRegex = new Regex($@"^Microsoft \.NET SDK (?<ver>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?) \({Regex.Escape(archLabel)}\)$", RegexOptions.CultureInvariant);
+        var sdkRegex = new Regex($@"^Microsoft \.NET(?: Core)? SDK(?: -)? (?<ver>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?) \({Regex.Escape(archLabel)}\)$", RegexOptions.CultureInvariant);
         var desktopRegex = new Regex($@"^Microsoft Windows Desktop Runtime - (?<ver>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?) \({Regex.Escape(archLabel)}\)$", RegexOptions.CultureInvariant);
         var aspRegex = new Regex($@"^Microsoft ASP\.NET Core (?:(?<ver>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?) - Shared Framework|Runtime - (?<ver>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)) \({Regex.Escape(archLabel)}\)$", RegexOptions.CultureInvariant);
-        var runtimeRegex = new Regex($@"^Microsoft \.NET Runtime - (?<ver>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?) \({Regex.Escape(archLabel)}\)$", RegexOptions.CultureInvariant);
+        var runtimeRegex = new Regex($@"^Microsoft \.NET(?: Core)? Runtime - (?<ver>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?) \({Regex.Escape(archLabel)}\)$", RegexOptions.CultureInvariant);
 
         var results = new List<DotNetStandaloneBundle>();
         foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
@@ -379,7 +396,7 @@ public sealed class DotNetPackageService : IDotNetPackageService
                     .Select(ver => CreateInstalledInstance(DotNetPackageKind.Sdk, ver, bundles, false, channelSdks.Count > 0))
                     .ToArray();
 
-                var publishedSdks = SelectCandidateVersions(detail?.SdkVersions, meta?.LatestSdk, channel, allowPre);
+                var publishedSdks = SelectCandidateVersions(detail?.SdkVersions, detail is null ? meta?.LatestSdk : null, channel, allowPre);
                 var latestChannelSdk = publishedSdks.FirstOrDefault();
                 var sdkBands = BuildSdkBandPlans(channelSdks, publishedSdks);
                 var hasBandUpdate = sdkBands.Any(band => band.HasUpdate);
@@ -388,6 +405,7 @@ public sealed class DotNetPackageService : IDotNetPackageService
                     : sdkBands.Count > 0
                         ? string.Join("; ", sdkBands.Select(band => band.Available))
                         : latestChannelSdk;
+                var installableSdks = BuildInstallableSdkVersions(publishedSdks);
 
                 packages.Add(new DotNetPackageEntry(
                     channel,
@@ -396,7 +414,8 @@ public sealed class DotNetPackageService : IDotNetPackageService
                     availableSdk,
                     latestChannelSdk,
                     hasBandUpdate,
-                    sdkBands));
+                    sdkBands,
+                    installableSdks));
                 continue;
             }
 
@@ -418,10 +437,20 @@ public sealed class DotNetPackageService : IDotNetPackageService
                 _ => null,
             };
 
-            var availableRuntime = SelectCandidateVersions(detailVersions, meta?.LatestRuntime, channel, allowPre).FirstOrDefault();
+            var fallbackRuntime = detail is null && (kind != DotNetPackageKind.DesktopRuntime || ParseChannelSortKey(channel).Major >= 3)
+                ? meta?.LatestRuntime
+                : null;
+            var publishedRuntimes = SelectCandidateVersions(detailVersions, fallbackRuntime, channel, allowPre);
+            if (runtimeInstances.Length == 0 && publishedRuntimes.Count == 0 && detail is not null)
+            {
+                continue;
+            }
+
+            var availableRuntime = publishedRuntimes.FirstOrDefault();
             var hasRuntimeUpdate = runtimeInstances.Length > 0
                 && !string.IsNullOrWhiteSpace(availableRuntime)
                 && DotNetVersionComparer.Instance.Compare(availableRuntime, runtimeInstances[0].Version) > 0;
+            var installableRuntimes = publishedRuntimes.Take(10).ToArray();
 
             packages.Add(new DotNetPackageEntry(
                 channel,
@@ -430,7 +459,8 @@ public sealed class DotNetPackageService : IDotNetPackageService
                 availableRuntime,
                 availableRuntime,
                 hasRuntimeUpdate,
-                []));
+                [],
+                installableRuntimes));
         }
 
         return new DotNetChannelInfo(
@@ -487,6 +517,27 @@ public sealed class DotNetPackageService : IDotNetPackageService
             .ToArray();
 
         return filtered;
+    }
+
+    private static IReadOnlyList<string> BuildInstallableSdkVersions(IReadOnlyList<string> publishedSdks)
+    {
+        if (publishedSdks.Count == 0)
+        {
+            return [];
+        }
+
+        var bandLeaders = publishedSdks
+            .GroupBy(ver => DotNetVersionComparer.TryGetFeatureBand(ver) ?? -1)
+            .OrderByDescending(group => group.Key)
+            .Select(group => group.OrderByDescending(ver => ver, DotNetVersionComparer.Instance).First())
+            .ToArray();
+
+        return bandLeaders
+            .Concat(publishedSdks.Take(12))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(ver => ver, DotNetVersionComparer.Instance)
+            .Take(14)
+            .ToArray();
     }
 
     private static IReadOnlyList<DotNetSdkBandPlan> BuildSdkBandPlans(
@@ -663,7 +714,10 @@ public sealed class DotNetPackageService : IDotNetPackageService
     private static bool IsSupportedDisplayChannel(string channel)
     {
         var parts = channel.Split('.');
-        return parts.Length == 2 && int.TryParse(parts[0], out var major) && major >= 5;
+        return parts.Length == 2
+            && int.TryParse(parts[0], out var major)
+            && int.TryParse(parts[1], out var minor)
+            && (major > 2 || (major == 2 && minor >= 1));
     }
 
     private static (int Major, int Minor) ParseChannelSortKey(string channel)

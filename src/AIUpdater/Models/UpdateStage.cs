@@ -76,12 +76,14 @@ public sealed class UpdateStage : ObservableObject
             "Официальная история выпусков Docker Desktop.")),
         new(".NET SDK 10", "Разработка", ".NET", true, static installedVersion =>
         {
-            var major = Math.Max(10, ExtractHighestMajorVersion(installedVersion) ?? 10);
+            var channel = ExtractHighestChannel(installedVersion) ?? "10.0";
+            var majorPart = channel.Split('.')[0];
+            var label = int.TryParse(majorPart, out var major) && major < 5 ? $".NET Core {channel}" : $".NET {majorPart}";
             return new(
-                $"https://github.com/dotnet/core/tree/main/release-notes/{major}.0",
-                $"https://builds.dotnet.microsoft.com/dotnet/release-metadata/{major}.0/releases.json",
+                $"https://github.com/dotnet/core/tree/main/release-notes/{channel}",
+                $"https://builds.dotnet.microsoft.com/dotnet/release-metadata/{channel}/releases.json",
                 "dotnet-releases",
-                $"Официальные метаданные выпусков .NET {major} SDK, Runtime и исправлений безопасности (CVE).");
+                $"Официальные метаданные выпусков {label} SDK, Runtime и исправлений безопасности (CVE).");
         }),
         new("Git", "Разработка", "Git", true, static _ => new(
             "https://github.com/git-for-windows/git/releases",
@@ -296,23 +298,27 @@ public sealed class UpdateStage : ObservableObject
         return match.Success && int.TryParse(match.Groups[1].Value, out var major) ? major : null;
     }
 
-    private static int? ExtractHighestMajorVersion(string? version)
+    private static string? ExtractHighestChannel(string? version)
     {
         if (string.IsNullOrWhiteSpace(version))
         {
             return null;
         }
 
-        int? highest = null;
-        foreach (Match match in Regex.Matches(version, @"\b(\d{1,2})\.\d+"))
+        (int Major, int Minor)? highest = null;
+        foreach (Match match in Regex.Matches(version, @"\b(\d{1,2})\.(\d{1,2})(?:\.\d+)?"))
         {
-            if (int.TryParse(match.Groups[1].Value, out var major) && (highest is null || major > highest.Value))
+            if (int.TryParse(match.Groups[1].Value, out var major) && int.TryParse(match.Groups[2].Value, out var minor))
             {
-                highest = major;
+                var candidate = (major, minor);
+                if (highest is null || candidate.CompareTo(highest.Value) > 0)
+                {
+                    highest = candidate;
+                }
             }
         }
 
-        return highest;
+        return highest is null ? null : $"{highest.Value.Major}.{highest.Value.Minor}";
     }
 
     private void Refresh()

@@ -500,11 +500,167 @@ function Test-DotNetTrustedInstallerUrl
     $uri = $null
     if (-not [Uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$uri)) { return $false }
     if ($uri.Scheme -cne 'https' -or -not [string]::IsNullOrEmpty($uri.Query) -or -not [string]::IsNullOrEmpty($uri.Fragment)) { return $false }
-    if ($uri.Host -cin @('builds.dotnet.microsoft.com', 'download.visualstudio.microsoft.com'))
+    if ($uri.Host -in @('builds.dotnet.microsoft.com', 'download.visualstudio.microsoft.com'))
     {
-        return $uri.AbsolutePath.EndsWith("/$ExpectedFileName", [StringComparison]::Ordinal)
+        return $uri.AbsolutePath.EndsWith("/$ExpectedFileName", [StringComparison]::OrdinalIgnoreCase)
     }
     return $false
+}
+
+$script:DotNetProgressHandler = {
+    param([string]$Detail)
+    [Console]::Out.WriteLine("[$(Get-Date -Format 'HH:mm:ss')] UI_PROGRESS $Detail")
+    [Console]::Out.Flush()
+}
+
+function Publish-DotNetProgress
+{
+    param([string]$Detail)
+    if ([string]::IsNullOrWhiteSpace($Detail)) { return }
+    if ($script:DotNetProgressHandler)
+    {
+        & $script:DotNetProgressHandler $Detail
+    }
+}
+
+function Write-DotNetStep
+{
+    param([string]$Message)
+    Write-Log $Message
+    Publish-DotNetProgress $Message
+}
+
+function Format-DotNetMegabytes
+{
+    param([long]$Bytes)
+    return ([double]$Bytes / 1048576.0).ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Copy-StreamWithProgress
+{
+    param(
+        [Parameter(Mandatory)][IO.Stream]$InputStream,
+        [Parameter(Mandatory)][IO.Stream]$OutputStream,
+        [long]$TotalBytes = -1,
+        [Parameter(Mandatory)][string]$Label,
+        [int]$ReportIntervalMs = 200
+    )
+    $buffer = New-Object byte[] 65536
+    [long]$downloaded = 0
+    $totalMb = if ($TotalBytes -gt 0) { Format-DotNetMegabytes $TotalBytes } else { '' }
+    if ($TotalBytes -gt 0)
+    {
+        Publish-DotNetProgress "Скачивание ${Label}: 0% (0.0 / $totalMb МБ)"
+    }
+    else
+    {
+        Publish-DotNetProgress "Скачивание ${Label}: 0.0 МБ"
+    }
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    [long]$lastReportMs = -$ReportIntervalMs
+    $lastPercent = 0
+    while ($true)
+    {
+        $read = $InputStream.Read($buffer, 0, $buffer.Length)
+        if ($read -le 0) { break }
+        $OutputStream.Write($buffer, 0, $read)
+        $downloaded += $read
+        $elapsed = $watch.ElapsedMilliseconds
+        if ($TotalBytes -gt 0)
+        {
+            $percent = [int][Math]::Min(99L, [Math]::Floor(($downloaded * 100.0) / $TotalBytes))
+            if (($elapsed - $lastReportMs) -ge $ReportIntervalMs -and ($percent -ne $lastPercent -or ($elapsed - $lastReportMs) -ge 800))
+            {
+                $curMb = Format-DotNetMegabytes $downloaded
+                Publish-DotNetProgress "Скачивание ${Label}: ${percent}% ($curMb / $totalMb МБ)"
+                $lastReportMs = $elapsed
+                $lastPercent = $percent
+            }
+        }
+        elseif (($elapsed - $lastReportMs) -ge $ReportIntervalMs)
+        {
+            $curMb = Format-DotNetMegabytes $downloaded
+            Publish-DotNetProgress "Скачивание ${Label}: $curMb МБ"
+            $lastReportMs = $elapsed
+        }
+    }
+    $OutputStream.Flush()
+    $finalMb = Format-DotNetMegabytes $downloaded
+    if ($TotalBytes -gt 0)
+    {
+        $shownTotal = if ($downloaded -gt $TotalBytes) { $finalMb } else { $totalMb }
+        Publish-DotNetProgress "Скачивание ${Label}: 100% ($finalMb / $shownTotal МБ)"
+    }
+    else
+    {
+        Publish-DotNetProgress "Скачивание ${Label}: 100% ($finalMb МБ)"
+    }
+}
+
+function Receive-DotNetInstallerFile
+{
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][string]$OutFile,
+        [Parameter(Mandatory)][string]$Label,
+        [int]$TimeoutSec = 600
+    )
+    $webCmd = Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue
+    if ($webCmd -and $webCmd.CommandType -eq 'Function')
+    {
+        Publish-DotNetProgress "Скачивание ${Label}: 0%"
+        Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
+        Publish-DotNetProgress "Скачивание ${Label}: 100%"
+        return
+    }
+
+    if (-not ('System.Net.Http.HttpClient' -as [type]))
+    {
+        Add-Type -AssemblyName System.Net.Http
+    }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $partFile = "$OutFile.part"
+    if (Test-Path -LiteralPath $partFile) { Remove-Item -LiteralPath $partFile -Force -ErrorAction SilentlyContinue }
+    $handler = [System.Net.Http.HttpClientHandler]::new()
+    $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
+    $client = [System.Net.Http.HttpClient]::new($handler, $true)
+    $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
+    $response = $null
+    try
+    {
+        $response = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+        $null = $response.EnsureSuccessStatusCode()
+        $totalBytes = if ($null -ne $response.Content.Headers.ContentLength) { [long]$response.Content.Headers.ContentLength } else { -1L }
+        $inStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        try
+        {
+            $outStream = [IO.FileStream]::new($partFile, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None, 65536)
+            try
+            {
+                Copy-StreamWithProgress -InputStream $inStream -OutputStream $outStream -TotalBytes $totalBytes -Label $Label
+            }
+            finally
+            {
+                $outStream.Dispose()
+            }
+        }
+        finally
+        {
+            $inStream.Dispose()
+        }
+        if (Test-Path -LiteralPath $OutFile) { Remove-Item -LiteralPath $OutFile -Force }
+        Move-Item -LiteralPath $partFile -Destination $OutFile -Force
+    }
+    catch
+    {
+        if (Test-Path -LiteralPath $partFile) { Remove-Item -LiteralPath $partFile -Force -ErrorAction SilentlyContinue }
+        throw
+    }
+    finally
+    {
+        if ($response) { $response.Dispose() }
+        $client.Dispose()
+    }
 }
 
 function Get-DotNetInstalledSdks
@@ -554,7 +710,7 @@ function Get-DevelopmentSdkVersions
     if (-not (Test-Tool 'dotnet')) { return @() }
     $result = Invoke-CommandCapture 'dotnet' @('--list-sdks') -NoLogCommand
     if ($result.ExitCode -ne 0) { throw "Could not list .NET SDKs: $($result.Text)" }
-    return @($result.Text -split "`r?`n" | Where-Object { $_ -match '^(?:1[0-9]|[2-9][0-9])\.[0-9]+\.[0-9]+\s+\[' } |
+    return @($result.Text -split "`r?`n" | Where-Object { $_ -match '^[1-9][0-9]*\.[0-9]+\.[0-9]+\s+\[' } |
         ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -Unique)
 }
 
@@ -575,6 +731,7 @@ function Get-DevelopmentSdkPlan
     foreach ($channelGroup in ($Installed | Group-Object { $v = [version]$_; "$($v.Major).$($v.Minor)" }))
     {
         $channel = $channelGroup.Name
+        Publish-DotNetProgress "Получение метаданных канала .NET $channel..."
         $response = Invoke-WebRequest -Uri "https://builds.dotnet.microsoft.com/dotnet/release-metadata/$channel/releases.json" -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
         $metadata = $response.Content | ConvertFrom-Json -ErrorAction Stop
         if ($metadata.'channel-version' -ne $channel -or -not $metadata.releases) { throw "Invalid .NET $channel release metadata" }
@@ -588,7 +745,7 @@ function Get-DevelopmentSdkPlan
             if (-not $release) { throw "No stable release metadata for SDK feature band $channel.$($group.Name)xx" }
             $installerName = "dotnet-sdk-$rid.exe"
             $versionedName = "dotnet-sdk-$($release.version)-$rid.exe"
-            $file = @($release.files | Where-Object { $_.rid -eq $rid -and $_.name -eq $installerName })
+            $file = @($release.files | Where-Object { $_.rid -eq $rid -and ($_.name -eq $installerName -or $_.name -eq $versionedName) } | Select-Object -First 1)
             if ($file.Count -ne 1 -or $file[0].hash -notmatch '^[a-fA-F0-9]{128}$') { throw 'Invalid .NET SDK installer metadata' }
             if (-not (Test-DotNetTrustedInstallerUrl -Url $file[0].url -ExpectedFileName $versionedName)) { throw 'Unexpected .NET SDK installer URL' }
             [pscustomobject]@{ Channel = $channel; Installed = $current; Available = $release.version; Update = [version]$release.version -gt [version]$current; Url = $file[0].url; Hash = $file[0].hash }
@@ -664,9 +821,11 @@ function Invoke-VerifiedDotNetInstaller
         [string]$Description
     )
     $installer = Join-Path $EvidenceDirectory $InstallerFileName
-    Write-Log "Downloading $Description..."
-    Invoke-WebRequest -Uri $Url -OutFile $installer -UseBasicParsing -TimeoutSec 600 -ErrorAction Stop
+    Write-Log "Скачивание установщика $InstallerFileName ($Description)..."
+    Receive-DotNetInstallerFile -Uri $Url -OutFile $installer -Label $InstallerFileName -TimeoutSec 600
+    Write-DotNetStep "Проверка контрольной суммы SHA-512: $InstallerFileName..."
     if ((Get-FileHash -LiteralPath $installer -Algorithm SHA512).Hash -ine $ExpectedHash) { throw 'SDK installer SHA512 mismatch' }
+    Write-DotNetStep "Проверка цифровой подписи Microsoft: $InstallerFileName..."
     $signature = Get-AuthenticodeSignature -LiteralPath $installer
     if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation,') { throw 'SDK installer Microsoft signature is invalid' }
     $before = if ($Channel -eq '10.0') { Get-DevelopmentSdkRetention } else { Get-DevelopmentSdkRetention -Channel $Channel }
@@ -676,7 +835,7 @@ function Invoke-VerifiedDotNetInstaller
         if ($Channel -eq '10.0') { Set-DevelopmentSdkRetention } else { Set-DevelopmentSdkRetention -Channel $Channel }
         $currentRetention = if ($Channel -eq '10.0') { Get-DevelopmentSdkRetention } else { Get-DevelopmentSdkRetention -Channel $Channel }
         if ($currentRetention.Value -ne 'never') { throw 'SDK retention policy could not be verified' }
-        Write-Log "$Description; retaining existing SDKs and runtimes"
+        Write-DotNetStep "Установка $InstallerFileName (сохранение установленных версий)..."
         $logFile = Join-Path $EvidenceDirectory ("install-" + [IO.Path]::GetFileNameWithoutExtension($InstallerFileName) + ".log")
         $process = Start-Process -FilePath $installer -ArgumentList @('/install','/quiet','/norestart',"/log `"$logFile`"") -WindowStyle Hidden -Wait -PassThru
         if ($process.ExitCode -notin @(0,3010)) { throw "SDK installer failed: $($process.ExitCode)" }
@@ -691,6 +850,7 @@ function Invoke-VerifiedDotNetInstaller
 function Update-DevelopmentSdk
 {
     $ProgressPreference = 'SilentlyContinue'
+    Publish-DotNetProgress 'Проверка установленных версий .NET SDK...'
     $installed = @(Get-DevelopmentSdkVersions)
     if (-not $installed.Count) { Write-Log '.NET SDK is not installed; update skipped'; return }
     $plan = @(Get-DevelopmentSdkPlan $installed | Where-Object Update)
@@ -719,6 +879,7 @@ function Update-DevelopmentSdk
                 -InstallerFileName "dotnet-sdk-$($item.Available)-$rid.exe" `
                 -EvidenceDirectory $directory `
                 -Description "Updating SDK feature band: $($item.Installed) -> $($item.Available)"
+            Publish-DotNetProgress 'Проверка установленных SDK и сред выполнения...'
             $after = @(Get-DevelopmentSdkVersions)
             foreach ($version in @($installed) + @($item.Available))
             {
@@ -732,7 +893,7 @@ function Update-DevelopmentSdk
                 { throw "A previous runtime is missing after servicing: $line" }
             }
         }
-        Write-Log "SDK servicing verified; previous versions retained. Evidence: $directory"
+        Write-DotNetStep "Обновление .NET SDK проверено; предыдущие версии сохранены"
     }
     finally { if ($acquired) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
 }
@@ -791,7 +952,7 @@ function Resolve-DotNetReleaseInstaller
         }
     }
     $versionedFileName = "$prefix-$($selected.version)-$rid.exe"
-    $file = @($selected.files | Where-Object { $_.rid -eq $rid -and $_.name -eq $installerName })
+    $file = @($selected.files | Where-Object { $_.rid -eq $rid -and ($_.name -eq $installerName -or $_.name -eq $versionedFileName) } | Select-Object -First 1)
     if ($file.Count -ne 1 -or $file[0].hash -notmatch '^[a-fA-F0-9]{128}$')
     {
         throw "Invalid installer metadata for .NET $Kind $($selected.version)"
@@ -832,8 +993,8 @@ function Find-DotNetStandaloneBundle
     $escapedArch = [regex]::Escape($archLabel)
     $namePattern = switch ($Kind)
     {
-        'Sdk' { "^Microsoft \.NET SDK $escapedVer \($escapedArch\)$" }
-        'Runtime' { "^Microsoft \.NET Runtime - $escapedVer \($escapedArch\)$" }
+        'Sdk' { "^Microsoft \.NET(?: Core)? SDK(?: -)? $escapedVer \($escapedArch\)$" }
+        'Runtime' { "^Microsoft \.NET(?: Core)? Runtime - $escapedVer \($escapedArch\)$" }
         'DesktopRuntime' { "^Microsoft Windows Desktop Runtime - $escapedVer \($escapedArch\)$" }
         'AspNetCoreRuntime' { "^Microsoft ASP\.NET Core (?:$escapedVer - Shared Framework|Runtime - $escapedVer) \($escapedArch\)$" }
     }
@@ -915,6 +1076,7 @@ function Invoke-DotNetPackageOperation
                         -InstallerFileName "dotnet-sdk-$($item.Available)-$rid.exe" `
                         -EvidenceDirectory $directory `
                         -Description "Updating .NET SDK $Channel feature band: $($item.Installed) -> $($item.Available)"
+                    Publish-DotNetProgress "Проверка установленных версий .NET $Channel..."
                     $sdksAfter = @(Get-DotNetInstalledSdks)
                     foreach ($ver in @($allSdksBefore) + @($item.Available))
                     {
@@ -939,6 +1101,7 @@ function Invoke-DotNetPackageOperation
     if ($Action -eq 'Uninstall')
     {
         if (-not $Version) { throw 'Uninstalling a .NET component requires an explicit version' }
+        Publish-DotNetProgress "Поиск системного установщика .NET $Kind $Version..."
         $bundle = Find-DotNetStandaloneBundle -Kind $Kind -Version $Version
         $mutex = [Threading.Mutex]::new($false, $script:DotNetSdkMutexName)
         $acquired = $false
@@ -949,16 +1112,17 @@ function Invoke-DotNetPackageOperation
             $directory = Join-Path (Split-Path -Parent $logPath) ('dotnet-uninstall-' + [guid]::NewGuid().ToString('N'))
             $null = New-Item -ItemType Directory -Path $directory
             $uninstallLog = Join-Path $directory "uninstall-$Kind-$Version.log"
-            Write-Log "Uninstalling $($bundle.DisplayName)"
+            Write-DotNetStep "Удаление $($bundle.DisplayName)..."
             $process = Start-Process -FilePath $bundle.ExecutablePath -ArgumentList @('/uninstall','/quiet','/norestart',"/log `"$uninstallLog`"") -WindowStyle Hidden -Wait -PassThru
             if ($process.ExitCode -notin @(0,3010)) { throw "Bundle uninstaller failed with exit code $($process.ExitCode)" }
             if ($process.ExitCode -eq 3010) { Write-Log 'Uninstallation succeeded; Windows reports that a restart is required (not initiated)' }
-            Write-Log "Uninstalled $($bundle.DisplayName)"
+            Write-DotNetStep "Удалено: $($bundle.DisplayName)"
             return
         }
         finally { if ($acquired) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
     }
 
+    Write-DotNetStep "Получение метаданных канала .NET $Channel..."
     $response = Invoke-WebRequest -Uri "https://builds.dotnet.microsoft.com/dotnet/release-metadata/$Channel/releases.json" -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
     $metadata = $response.Content | ConvertFrom-Json -ErrorAction Stop
     $artifact = Resolve-DotNetReleaseInstaller -Metadata $metadata -Channel $Channel -Kind $Kind -Version $Version -IncludePrerelease:$IncludePrerelease
@@ -981,6 +1145,7 @@ function Invoke-DotNetPackageOperation
             -InstallerFileName $artifact.FileName `
             -EvidenceDirectory $directory `
             -Description "Installing .NET $Kind $($artifact.Version)"
+        Publish-DotNetProgress "Проверка установленных версий .NET..."
         $sdksAfter = @(Get-DotNetInstalledSdks)
         foreach ($ver in $sdksBefore)
         {

@@ -870,6 +870,7 @@ internal static partial class Program
         File.WriteAllText(calls, "");
         File.Delete(Path.Combine(output, "fail"));
         File.Delete(Path.Combine(output, "wait"));
+        File.Delete(Path.Combine(output, "dotnet-wait"));
         File.Delete(Path.Combine(output, "missing"));
         File.Delete(Path.Combine(output, "error-result"));
         File.WriteAllText(fixture, """
@@ -880,6 +881,10 @@ internal static partial class Program
                                    Write-Output "[12:34:56] === $OnlyStage ==="
                                    if (Test-Path (Join-Path $PSScriptRoot 'fail')) { exit 5 }
                                    if (Test-Path (Join-Path $PSScriptRoot 'missing')) { exit 0 }
+                                   if ((Test-Path (Join-Path $PSScriptRoot 'dotnet-wait')) -and $DotNetPackageKind) {
+                                       Write-Output "[12:34:56] UI_PROGRESS Скачивание dotnet-sdk-11.0.101-win-x64.exe: 42% (91.4 / 217.6 МБ)"
+                                       while (Test-Path (Join-Path $PSScriptRoot 'dotnet-wait')) { Start-Sleep -Milliseconds 30 }
+                                   }
                                    if ((Test-Path (Join-Path $PSScriptRoot 'wait')) -and $OnlyStage -ne 'DSH') { Write-Output ("{0} 37%" -f [char]0x2588); Start-Sleep -Seconds 30 }
                                    $result = if (Test-Path (Join-Path $PSScriptRoot 'error-result')) { 'ERROR' } else { 'CURRENT' }
                                    $json = @{ Stage = $OnlyStage; Result = $result; Installed = '2.2.1'; Available = '2.2.1' } | ConvertTo-Json -Compress
@@ -941,9 +946,39 @@ internal static partial class Program
         Check(stage.Status == "Ошибка проверки" && viewModel.OverallStatusText.Contains("Ошибок проверки: 1"), "Check completion overwrote its failure result");
         File.Delete(Path.Combine(output, "error-result"));
         File.WriteAllText(calls, "");
+        shell.Navigate(AIUpdater.Bootstrap.SectionKey.DotNet);
+        visualHost.Settle();
+        var dotNetWaitFile = Path.Combine(output, "dotnet-wait");
+        File.WriteAllText(dotNetWaitFile, "");
         var net11Row = shell.DotNet.Channels.Single(ch => ch.Info.Channel == "11.0").Packages.Single(pkg => pkg.Entry.Kind == DotNetPackageKind.Sdk);
-        Await(net11Row.PrimaryActionCommand.ExecuteAsync(null));
+        var liveInstallTask = net11Row.PrimaryActionCommand.ExecuteAsync(null);
+        Await(WaitForDotNetDownloadProgress(shell.DotNet));
+        visualHost.Settle();
+        var liveDotNetView = Descendants<DotNetView>(window).Single();
+        var liveBar = (ProgressBar)liveDotNetView.FindName("BusyProgressBar");
+        var livePercent = (TextBlock)liveDotNetView.FindName("BusyPercentTextBlock");
+        var liveDetail = (TextBlock)liveDotNetView.FindName("BusyDetailTextBlock");
+        var liveNet11RowView = Descendants<DotNetPackageRowView>(liveDotNetView)
+            .Single(row => row.DataContext is DotNetPackageRowViewModel { Entry: { Channel: "11.0", Kind: DotNetPackageKind.Sdk } });
+        var liveStatusBar = Descendants<StatusBarView>(window).Single();
+        var liveStatusBarText = ((TextBlock)liveStatusBar.FindName("OperationStatusText")).Text;
+        Check(!liveBar.IsIndeterminate && Math.Abs(liveBar.Value - 42d) < 0.01, "Determinate .NET download progress bar did not update to 42%");
+        Check(livePercent.Text == "42%" && liveDetail.Text.Contains("91.4 / 217.6 МБ"), "Top .NET busy panel did not show percentage and downloaded MB");
+        Check(((TextBlock)liveNet11RowView.FindName("StatusTextBlock")).Text == "Установка · 42%"
+              && ((TextBlock)liveNet11RowView.FindName("OperationDetailText")).Text.Contains("91.4 / 217.6 МБ"),
+            "Active .NET package row did not show live download progress");
+        Check(liveStatusBarText.Contains("42% (91.4 / 217.6 МБ)") && !liveStatusBarText.Contains('\n'),
+            "Shared bottom status bar did not show single-line .NET download progress");
+        Check(!viewModel.LogPanel.GeneralLogText.Contains("UI_PROGRESS"), "UI_PROGRESS protocol leaked into the visible journal");
+        Render((FrameworkElement)window.Content, Path.Combine(output, "shell-dotnet-downloading.png"), 1200, 800);
+        File.Delete(dotNetWaitFile);
+        Await(liveInstallTask);
         Check(File.ReadAllLines(calls).SequenceEqual(["Install|.NET SDK 10|False|Sdk|11.0|11.0.101|False"]), ".NET 11 SDK install dispatch passed wrong arguments");
+        File.WriteAllText(calls, "");
+        var net8Row = shell.DotNet.Channels.Single(ch => ch.Info.Channel == "8.0").Packages.Single(pkg => pkg.Entry.Kind == DotNetPackageKind.Sdk);
+        var band8Option = net8Row.InstallOptions.Single(opt => opt.Version == "8.0.320");
+        Await(band8Option.Command.ExecuteAsync(null));
+        Check(File.ReadAllLines(calls).SequenceEqual(["Install|.NET SDK 10|False|Sdk|8.0|8.0.320|False"]), "Specific .NET 8 SDK feature-band install did not dispatch 8.0.320");
         File.WriteAllText(calls, "");
         var net10Row = shell.DotNet.Channels.Single(ch => ch.Info.Channel == "10.0").Packages.Single(pkg => pkg.Entry.Kind == DotNetPackageKind.Sdk);
         var removableInstance = net10Row.Entry.InstalledInstances.Single(inst => inst.CanUninstall);
@@ -959,7 +994,7 @@ internal static partial class Program
         acceptedDialog.AcceptCommand.Execute(null);
         Await(confirmedUninstall);
         Check(File.ReadAllLines(calls).SequenceEqual(["Uninstall|.NET SDK 10|False|Sdk|10.0|10.0.102|False"]), "Confirmed .NET SDK uninstall did not dispatch exact version");
-        Console.WriteLine("PASS: .NET 11/10/12/8 catalog, standalone vs VS ownership, install dispatch and safe uninstall confirmation");
+        Console.WriteLine("PASS: all .NET/.NET Core versions (12/11/10/9/8/3.1/2.1), feature-band selector, live MB/% download progress, standalone vs VS ownership and safe uninstall confirmation");
         Console.WriteLine("PASS: independent states, selection, chunked JSON, vendor guard, malformed payload, persistence, two WPF widths, selected dispatch, post-update check, failure isolation, stop running/queued cards");
         var darkOutput = Path.Combine(Path.GetDirectoryName(output)!, "dark-controls");
         Directory.CreateDirectory(darkOutput);
@@ -973,6 +1008,15 @@ internal static partial class Program
         Console.WriteLine("PASS: binding sensor self-test and zero binding errors in the shared application graph");
     }
 
+    private static async Task WaitForDotNetDownloadProgress(DotNetViewModel dotNet)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (dotNet.IsBusy && dotNet.OperationPercentText != "42%")
+        {
+            await Task.Delay(20, timeout.Token);
+        }
+    }
+
     private static StubChangelogContentFetcher CreateDotNetStubFetcher() => new(
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -982,7 +1026,11 @@ internal static partial class Program
                     { "channel-version": "12.0", "latest-release": "12.0.0-preview.2", "latest-sdk": "12.0.100-preview.2.26150.4", "latest-runtime": "12.0.0-preview.2.26149.1", "release-type": "sts", "support-phase": "preview", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/12.0/releases.json" },
                     { "channel-version": "11.0", "latest-release": "11.0.1", "latest-sdk": "11.0.101", "latest-runtime": "11.0.1", "release-type": "sts", "support-phase": "active", "eol-date": "2028-05-14", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/11.0/releases.json" },
                     { "channel-version": "10.0", "latest-release": "10.0.5", "latest-sdk": "10.0.303", "latest-runtime": "10.0.5", "release-type": "lts", "support-phase": "active", "eol-date": "2028-11-14", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json" },
-                    { "channel-version": "8.0", "latest-release": "8.0.25", "latest-sdk": "8.0.419", "latest-runtime": "8.0.25", "release-type": "lts", "support-phase": "eol", "eol-date": "2026-11-10", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/8.0/releases.json" }
+                    { "channel-version": "9.0", "latest-release": "9.0.15", "latest-sdk": "9.0.315", "latest-runtime": "9.0.15", "release-type": "sts", "support-phase": "eol", "eol-date": "2026-05-12", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/9.0/releases.json" },
+                    { "channel-version": "8.0", "latest-release": "8.0.25", "latest-sdk": "8.0.419", "latest-runtime": "8.0.25", "release-type": "lts", "support-phase": "eol", "eol-date": "2026-11-10", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/8.0/releases.json" },
+                    { "channel-version": "3.1", "latest-release": "3.1.32", "latest-sdk": "3.1.426", "latest-runtime": "3.1.32", "release-type": "lts", "support-phase": "eol", "eol-date": "2022-12-13", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/3.1/releases.json" },
+                    { "channel-version": "2.1", "latest-release": "2.1.30", "latest-sdk": "2.1.818", "latest-runtime": "2.1.30", "release-type": "lts", "support-phase": "eol", "eol-date": "2021-08-21", "releases.json": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/2.1/releases.json" },
+                    { "channel-version": "1.1", "latest-release": "1.1.13", "latest-sdk": "1.1.14", "latest-runtime": "1.1.13", "release-type": "lts", "support-phase": "eol", "eol-date": "2019-06-27" }
                   ]
                 }
                 """,
@@ -1042,6 +1090,25 @@ internal static partial class Program
                   ]
                 }
                 """,
+            ["https://builds.dotnet.microsoft.com/dotnet/release-metadata/9.0/releases.json"] = """
+                {
+                  "channel-version": "9.0",
+                  "release-type": "sts",
+                  "support-phase": "eol",
+                  "latest-release": "9.0.15",
+                  "latest-sdk": "9.0.315",
+                  "latest-runtime": "9.0.15",
+                  "eol-date": "2026-05-12",
+                  "releases": [
+                    {
+                      "sdks": [{ "version": "9.0.315" }, { "version": "9.0.105" }],
+                      "runtime": { "version": "9.0.15" },
+                      "windowsdesktop": { "version": "9.0.15" },
+                      "aspnetcore-runtime": { "version": "9.0.15" }
+                    }
+                  ]
+                }
+                """,
             ["https://builds.dotnet.microsoft.com/dotnet/release-metadata/8.0/releases.json"] = """
                 {
                   "channel-version": "8.0",
@@ -1057,6 +1124,43 @@ internal static partial class Program
                       "runtime": { "version": "8.0.25" },
                       "windowsdesktop": { "version": "8.0.25" },
                       "aspnetcore-runtime": { "version": "8.0.25" }
+                    }
+                  ]
+                }
+                """,
+            ["https://builds.dotnet.microsoft.com/dotnet/release-metadata/3.1/releases.json"] = """
+                {
+                  "channel-version": "3.1",
+                  "release-type": "lts",
+                  "support-phase": "eol",
+                  "latest-release": "3.1.32",
+                  "latest-sdk": "3.1.426",
+                  "latest-runtime": "3.1.32",
+                  "eol-date": "2022-12-13",
+                  "releases": [
+                    {
+                      "sdks": [{ "version": "3.1.426" }, { "version": "3.1.120" }],
+                      "runtime": { "version": "3.1.32" },
+                      "windowsdesktop": { "version": "3.1.32" },
+                      "aspnetcore-runtime": { "version": "3.1.32" }
+                    }
+                  ]
+                }
+                """,
+            ["https://builds.dotnet.microsoft.com/dotnet/release-metadata/2.1/releases.json"] = """
+                {
+                  "channel-version": "2.1",
+                  "release-type": "lts",
+                  "support-phase": "eol",
+                  "latest-release": "2.1.30",
+                  "latest-sdk": "2.1.818",
+                  "latest-runtime": "2.1.30",
+                  "eol-date": "2021-08-21",
+                  "releases": [
+                    {
+                      "sdks": [{ "version": "2.1.818" }],
+                      "runtime": { "version": "2.1.30" },
+                      "aspnetcore-runtime": { "version": "2.1.30" }
                     }
                   ]
                 }

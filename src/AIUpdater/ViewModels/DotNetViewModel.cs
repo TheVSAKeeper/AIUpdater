@@ -6,6 +6,7 @@ using KeepShell.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Text.RegularExpressions;
 
 namespace AIUpdater.ViewModels;
 
@@ -56,6 +57,36 @@ public sealed class DotNetUninstallOptionViewModel
     public void RefreshCanExecute() => Command.NotifyCanExecuteChanged();
 }
 
+public sealed class DotNetInstallOptionViewModel
+{
+    public DotNetInstallOptionViewModel(
+        string version,
+        string header,
+        bool isAlreadyInstalled,
+        Func<string, Task> installAsync,
+        Func<bool> canExecute)
+    {
+        Version = version;
+        Header = header;
+        IsAlreadyInstalled = isAlreadyInstalled;
+        Command = new AsyncRelayCommand(
+            () => installAsync(version),
+            () => !isAlreadyInstalled && canExecute());
+    }
+
+    public string Version { get; }
+
+    public string Header { get; }
+
+    public bool IsAlreadyInstalled { get; }
+
+    public bool IsEnabled => !IsAlreadyInstalled;
+
+    public IAsyncRelayCommand Command { get; }
+
+    public void RefreshCanExecute() => Command.NotifyCanExecuteChanged();
+}
+
 public sealed class DotNetPackageRowViewModel : ObservableObject
 {
     private readonly Func<DotNetOperationRequest, Task> _runOperationAsync;
@@ -90,6 +121,8 @@ public sealed class DotNetPackageRowViewModel : ObservableObject
                 item => _uninstallInstanceAsync(entry.Kind, item),
                 _canInteract))
             .ToArray();
+
+        InstallOptions = BuildInstallOptions(entry, channel, includePrerelease, _runOperationAsync, _canInteract);
 
         PrimaryActionCommand = new AsyncRelayCommand(ExecutePrimaryActionAsync, () => HasPrimaryAction && _canInteract());
         InstallLatestCommand = new AsyncRelayCommand(ExecuteInstallLatestAsync, () => CanInstallLatest && _canInteract());
@@ -132,20 +165,30 @@ public sealed class DotNetPackageRowViewModel : ObservableObject
                     ? DotNetPackageRowState.EolInstalled
                     : DotNetPackageRowState.UpToDate;
 
-    public string StatusText => _activeAction switch
+    public string StatusText
     {
-        DotNetActionKind.Install => "Установка…",
-        DotNetActionKind.Update => "Обновление…",
-        DotNetActionKind.Uninstall => "Удаление…",
-        _ => RowState switch
+        get
         {
-            DotNetPackageRowState.NotInstalled => "Не установлено",
-            DotNetPackageRowState.UpdateAvailable => "Есть обновление",
-            DotNetPackageRowState.EolInstalled => "Ветка EOL",
-            DotNetPackageRowState.UpToDate => "Актуально",
-            _ => "Не проверено",
-        },
-    };
+            var baseStatus = _activeAction switch
+            {
+                DotNetActionKind.Install => "Установка…",
+                DotNetActionKind.Update => "Обновление…",
+                DotNetActionKind.Uninstall => "Удаление…",
+                _ => RowState switch
+                {
+                    DotNetPackageRowState.NotInstalled => "Не установлено",
+                    DotNetPackageRowState.UpdateAvailable => "Есть обновление",
+                    DotNetPackageRowState.EolInstalled => "Ветка EOL",
+                    DotNetPackageRowState.UpToDate => "Актуально",
+                    _ => "Не проверено",
+                },
+            };
+
+            return _activeAction != DotNetActionKind.None && DotNetViewModel.TryParsePercent(OperationDetail, out var percent)
+                ? $"{baseStatus.TrimEnd('…')} · {percent}%"
+                : baseStatus;
+        }
+    }
 
     public string OperationDetail => IsActive ? (_getOperationDetail() ?? "") : "";
 
@@ -153,7 +196,7 @@ public sealed class DotNetPackageRowViewModel : ObservableObject
     {
         get
         {
-            var lines = new List<string> { $"{Title} (.NET {Entry.Channel})" };
+            var lines = new List<string> { $"{Title} ({DotNetChannelInfo.FormatChannelTag(Entry.Channel)})" };
             if (Entry.IsInstalled)
             {
                 foreach (var instance in Entry.InstalledInstances)
@@ -197,6 +240,10 @@ public sealed class DotNetPackageRowViewModel : ObservableObject
         : Entry.IsInstalled && Entry.CanInstallLatestBand
             ? $"Установить SDK {Entry.LatestChannelVersion}"
             : $"Установить {Entry.LatestChannelVersion}";
+
+    public IReadOnlyList<DotNetInstallOptionViewModel> InstallOptions { get; }
+
+    public bool HasInstallVersionMenu => InstallOptions.Count > 1 || (Entry.IsInstalled && InstallOptions.Count > 0);
 
     public IReadOnlyList<DotNetUninstallOptionViewModel> UninstallOptions { get; }
 
@@ -244,10 +291,16 @@ public sealed class DotNetPackageRowViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(CanInteract));
         OnPropertyChanged(nameof(OperationDetail));
+        OnPropertyChanged(nameof(StatusText));
         PrimaryActionCommand.NotifyCanExecuteChanged();
         InstallLatestCommand.NotifyCanExecuteChanged();
         UpdateCommand.NotifyCanExecuteChanged();
         UninstallSingleCommand.NotifyCanExecuteChanged();
+        foreach (var option in InstallOptions)
+        {
+            option.RefreshCanExecute();
+        }
+
         foreach (var option in UninstallOptions)
         {
             option.RefreshCanExecute();
@@ -298,6 +351,70 @@ public sealed class DotNetPackageRowViewModel : ObservableObject
             ? _uninstallInstanceAsync(Entry.Kind, Entry.InstalledInstances[0])
             : Task.CompletedTask;
 
+    private static IReadOnlyList<DotNetInstallOptionViewModel> BuildInstallOptions(
+        DotNetPackageEntry entry,
+        DotNetChannelInfo channel,
+        bool includePrerelease,
+        Func<DotNetOperationRequest, Task> runOperationAsync,
+        Func<bool> canInteract)
+    {
+        if (entry.SelectableVersions.Count == 0)
+        {
+            return [];
+        }
+
+        var distinctBands = entry.Kind == DotNetPackageKind.Sdk
+            ? entry.SelectableVersions
+                .Select(DotNetVersionComparer.TryGetFeatureBand)
+                .OfType<int>()
+                .Distinct()
+                .Count()
+            : 0;
+
+        var bandLeaders = entry.Kind == DotNetPackageKind.Sdk && distinctBands > 1
+            ? entry.SelectableVersions
+                .Where(ver => DotNetVersionComparer.TryGetFeatureBand(ver) is not null)
+                .GroupBy(ver => DotNetVersionComparer.TryGetFeatureBand(ver)!.Value)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderByDescending(ver => ver, DotNetVersionComparer.Instance).First())
+            : [];
+
+        return entry.SelectableVersions
+            .Select(ver =>
+            {
+                var isInstalled = entry.InstalledInstances.Any(inst => string.Equals(inst.Version, ver, StringComparison.OrdinalIgnoreCase));
+                string header;
+                if (isInstalled)
+                {
+                    header = $"{ver} · установлена";
+                }
+                else if (DotNetVersionComparer.TryGetFeatureBand(ver) is { } band
+                         && bandLeaders.TryGetValue(band, out var leader)
+                         && string.Equals(leader, ver, StringComparison.OrdinalIgnoreCase))
+                {
+                    header = $"{ver} · линейка {entry.Channel}.{band}xx";
+                }
+                else
+                {
+                    header = ver;
+                }
+
+                return new DotNetInstallOptionViewModel(
+                    ver,
+                    header,
+                    isInstalled,
+                    selectedVer => runOperationAsync(new DotNetOperationRequest(
+                        DotNetActionKind.Install,
+                        entry.Kind,
+                        entry.Channel,
+                        selectedVer,
+                        includePrerelease || channel.IsPreview || DotNetVersionComparer.IsPrerelease(selectedVer))),
+                    canInteract);
+            })
+            .ToArray();
+    }
+
     private static string BuildOwnerSubtitle(IReadOnlyList<DotNetInstalledInstance> instances)
     {
         var owners = instances.Select(instance => instance.OwnerLabel).Distinct(StringComparer.Ordinal).ToArray();
@@ -320,7 +437,9 @@ public sealed class DotNetChannelViewModel
 
     public DotNetChannelInfo Info { get; }
 
-    public string Title => $"{Info.DisplayTitle} ({Info.Channel})";
+    public string Title => Info.DisplayTitle.Contains(Info.Channel, StringComparison.Ordinal)
+        ? Info.DisplayTitle
+        : $"{Info.DisplayTitle} ({Info.Channel})";
 
     public string BadgeText => Info.BadgeText;
 
@@ -345,6 +464,10 @@ public sealed class DotNetChannelViewModel
 
 public sealed class DotNetViewModel : ObservableObject, IDisposable, IPageHeader, IPageRefresh
 {
+    private static readonly Regex PercentPattern = new(
+        @"(?<!\d)(?<pct>100|[1-9]?\d)%",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private readonly MainViewModel _updates;
     private readonly IDotNetPackageService _packageService;
     private readonly IUpdaterDialogs _dialogs;
@@ -418,7 +541,7 @@ public sealed class DotNetViewModel : ObservableObject, IDisposable, IPageHeader
                 RebuildChannels();
             }
         }
-    }
+    } = true;
 
     public bool InstalledOnly
     {
@@ -451,6 +574,41 @@ public sealed class DotNetViewModel : ObservableObject, IDisposable, IPageHeader
     public string BusyTitle => IsLoading
         ? "Загрузка каталога выпусков .NET…"
         : _activeOperation?.DisplayLabel ?? _updates.OperationTitle;
+
+    public string OperationDetail => IsLoading ? "" : (GetDevVendorDetail() ?? "");
+
+    public bool HasOperationDetail =>
+        !IsLoading
+        && _updates.IsRunning
+        && !string.IsNullOrWhiteSpace(OperationDetail)
+        && !string.Equals(OperationDetail, BusyTitle, StringComparison.Ordinal);
+
+    public double OperationProgressValue =>
+        !IsLoading && _updates.IsRunning && TryParsePercent(OperationDetail, out var percent)
+            ? percent
+            : 0d;
+
+    public bool IsOperationIndeterminate =>
+        IsLoading || !_updates.IsRunning || !TryParsePercent(OperationDetail, out _);
+
+    public string OperationPercentText =>
+        !IsLoading && _updates.IsRunning && TryParsePercent(OperationDetail, out var percent)
+            ? $"{percent}%"
+            : "";
+
+    public bool HasOperationPercent => OperationPercentText.Length > 0;
+
+    internal static bool TryParsePercent(string? text, out int percent)
+    {
+        percent = 0;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var match = PercentPattern.Match(text);
+        return match.Success && int.TryParse(match.Groups["pct"].Value, out percent) && percent is >= 0 and <= 100;
+    }
 
     public async Task EnsureLoadedAsync()
     {
@@ -653,13 +811,37 @@ public sealed class DotNetViewModel : ObservableObject, IDisposable, IPageHeader
         }
     }
 
-    private string? GetDevVendorDetail() =>
-        _updates.Vendors.FirstOrDefault(vendor => vendor.Name == "Разработка")?.Detail;
+    private string? GetDevVendorDetail()
+    {
+        if (_activeOperation is null && !_updates.Stages.Any(stage => stage.Vendor == "Разработка" && stage.IsActiveOperation))
+        {
+            return null;
+        }
+
+        var raw = _updates.Vendors.FirstOrDefault(vendor => vendor.Name == "Разработка")?.Detail;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var detail = raw.Trim();
+        if (detail.StartsWith(".NET:", StringComparison.Ordinal))
+        {
+            detail = detail[5..].TrimStart();
+        }
+        else if (string.Equals(detail, ".NET", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return detail;
+    }
 
     private void OnUpdatesPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(MainViewModel.IsRunning)
             or nameof(MainViewModel.ActiveOperationText)
+            or nameof(MainViewModel.StatusCaption)
             or nameof(MainViewModel.OperationTitle))
         {
             RefreshInteractiveState();
@@ -671,6 +853,12 @@ public sealed class DotNetViewModel : ObservableObject, IDisposable, IPageHeader
         OnPropertyChanged(nameof(IsBusy));
         OnPropertyChanged(nameof(CanInteract));
         OnPropertyChanged(nameof(BusyTitle));
+        OnPropertyChanged(nameof(OperationDetail));
+        OnPropertyChanged(nameof(HasOperationDetail));
+        OnPropertyChanged(nameof(OperationProgressValue));
+        OnPropertyChanged(nameof(IsOperationIndeterminate));
+        OnPropertyChanged(nameof(OperationPercentText));
+        OnPropertyChanged(nameof(HasOperationPercent));
         RefreshCommand.NotifyCanExecuteChanged();
         foreach (var row in Channels.SelectMany(channel => channel.Packages))
         {

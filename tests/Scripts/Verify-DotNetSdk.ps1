@@ -5,6 +5,7 @@ Import-Module Microsoft.PowerShell.Management
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $root 'src\AIUpdater\Scripts\Manage-Components.ps1')
 . (Join-Path $root 'src\AIUpdater\Scripts\Check-Updates.ps1')
+$realGetDevelopmentSdkVersions = (Get-Command Get-DevelopmentSdkVersions).ScriptBlock
 $script:DotNetSdkMutexName = 'Local\AIUpdater.DotNetSdk.Tests.' + [guid]::NewGuid().ToString('N')
 $script:manifestError = $false
 $script:downloadError = $false
@@ -19,6 +20,8 @@ $script:restored = $false
 $script:policy = 'nextSession'
 $script:runtimeLost = $false
 $script:messages = [Collections.Generic.List[string]]::new()
+$script:progressMessages = [Collections.Generic.List[string]]::new()
+$script:DotNetProgressHandler = { param($Detail) $script:progressMessages.Add($Detail) }
 $script:manifest = @{ 'channel-version' = '10.0'; releases = @(@{ sdks = @(
     @{version='10.0.114'; files=@(@{name='dotnet-sdk-win-x64.exe';rid='win-x64';url='https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.114/dotnet-sdk-10.0.114-win-x64.exe';hash=('a' * 128)})},
     @{version='10.0.303'; files=@(@{name='dotnet-sdk-win-x64.exe';rid='win-x64';url='https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.303/dotnet-sdk-10.0.303-win-x64.exe';hash=('a' * 128)})},
@@ -107,9 +110,56 @@ try
     if (-not $failed) { throw 'Untrusted installer URL accepted' }
 
     & {
-        $script:channelPolicies = @{ '10.0' = 'nextSession'; '11.0' = 'nextSession'; '12.0' = 'nextSession' }
-        $script:channelSdks = [Collections.Generic.List[string]]::new([string[]]@('10.0.102', '11.0.100'))
+        function Test-Tool { param($Name) return $Name -eq 'dotnet' }
+        function Invoke-CommandCapture
+        {
+            param($FilePath, $Arguments, [switch]$NoLogCommand)
+            $sdkText = @(
+                '3.1.426 [C:\Program Files\dotnet\sdk]',
+                '7.0.404 [C:\Program Files\dotnet\sdk]',
+                '8.0.301 [C:\Program Files\dotnet\sdk]',
+                '9.0.315 [C:\Program Files\dotnet\sdk]',
+                '10.0.303 [C:\Program Files\dotnet\sdk]',
+                '11.0.101 [C:\Program Files\dotnet\sdk]',
+                '12.0.100-preview.2.26150.4 [C:\Program Files\dotnet\sdk]'
+            ) -join "`r`n"
+            return [pscustomobject]@{ ExitCode = 0; Text = $sdkText }
+        }
+        $detectedAll = @(& $realGetDevelopmentSdkVersions)
+        if ($detectedAll -join ',' -ne '3.1.426,7.0.404,8.0.301,9.0.315,10.0.303,11.0.101')
+        {
+            throw "Get-DevelopmentSdkVersions did not return all stable .NET / .NET Core SDK majors: $($detectedAll -join ',')"
+        }
+
+        $payloadBytes = New-Object byte[] 2621440
+        $memIn = [IO.MemoryStream]::new($payloadBytes, $false)
+        $memOut = [IO.MemoryStream]::new()
+        $script:progressMessages.Clear()
+        $copiedLength = 0L
+        try
+        {
+            Copy-StreamWithProgress -InputStream $memIn -OutputStream $memOut -TotalBytes $payloadBytes.Length -Label 'dotnet-sdk-11.0.101-win-x64.exe' -ReportIntervalMs 0
+            $copiedLength = $memOut.Length
+        }
+        finally
+        {
+            $memIn.Dispose()
+            $memOut.Dispose()
+        }
+        if ($copiedLength -ne $payloadBytes.Length) { throw 'Copy-StreamWithProgress corrupted byte length' }
+        if ($script:progressMessages[0] -ne 'Скачивание dotnet-sdk-11.0.101-win-x64.exe: 0% (0.0 / 2.5 МБ)' -or
+            $script:progressMessages[-1] -ne 'Скачивание dotnet-sdk-11.0.101-win-x64.exe: 100% (2.5 / 2.5 МБ)' -or
+            -not @($script:progressMessages | Where-Object { $_ -like '*50% (1.3 / 2.5 МБ)*' -or $_ -like '*50% (1.2 / 2.5 МБ)*' }).Count)
+        {
+            throw "Copy-StreamWithProgress did not emit expected MB percentages: $($script:progressMessages -join ' | ')"
+        }
+    }
+
+    & {
+        $script:channelPolicies = @{ '3.1' = 'nextSession'; '8.0' = 'nextSession'; '10.0' = 'nextSession'; '11.0' = 'nextSession'; '12.0' = 'nextSession' }
+        $script:channelSdks = [Collections.Generic.List[string]]::new([string[]]@('8.0.301', '10.0.102', '11.0.100'))
         $script:channelRuntimes = [Collections.Generic.List[object]]::new([object[]]@(
+            [pscustomobject]@{ Name = 'Microsoft.NETCore.App'; Version = '8.0.8' },
             [pscustomobject]@{ Name = 'Microsoft.NETCore.App'; Version = '10.0.3' },
             [pscustomobject]@{ Name = 'Microsoft.NETCore.App'; Version = '11.0.0' }
         ))
@@ -117,6 +167,23 @@ try
         $script:signatureValid = $true
 
         $manifests = @{
+            '3.1' = @{
+                'channel-version' = '3.1'
+                'support-phase' = 'eol'
+                releases = @(@{
+                    sdks = @(@{ version = '3.1.426'; files = @(@{ name = 'dotnet-sdk-3.1.426-win-x64.exe'; rid = 'win-x64'; url = 'https://builds.dotnet.microsoft.com/dotnet/Sdk/3.1.426/dotnet-sdk-3.1.426-win-x64.exe'; hash = ('a' * 128) }) })
+                })
+            }
+            '8.0' = @{
+                'channel-version' = '8.0'
+                'support-phase' = 'eol'
+                releases = @(@{
+                    sdks = @(
+                        @{ version = '8.0.419'; files = @(@{ name = 'dotnet-sdk-win-x64.exe'; rid = 'win-x64'; url = 'https://builds.dotnet.microsoft.com/dotnet/Sdk/8.0.419/dotnet-sdk-8.0.419-win-x64.exe'; hash = ('a' * 128) }) },
+                        @{ version = '8.0.320'; files = @(@{ name = 'dotnet-sdk-win-x64.exe'; rid = 'win-x64'; url = 'https://builds.dotnet.microsoft.com/dotnet/Sdk/8.0.320/dotnet-sdk-8.0.320-win-x64.exe'; hash = ('a' * 128) }) }
+                    )
+                })
+            }
             '10.0' = @{
                 'channel-version' = '10.0'
                 'support-phase' = 'active'
@@ -174,7 +241,7 @@ try
             if ($Channel) { return @($script:channelSdks | Where-Object { $_.StartsWith("$Channel.", [StringComparison]::Ordinal) }) }
             return @($script:channelSdks)
         }
-        function Get-DevelopmentSdkVersions { return @(Get-DotNetInstalledSdks | Where-Object { $_ -match '^([1-9][0-9]+)\.[0-9]+\.[0-9]+$' }) }
+        function Get-DevelopmentSdkVersions { return @(Get-DotNetInstalledSdks | Where-Object { $_ -match '^([1-9][0-9]*)\.[0-9]+\.[0-9]+$' }) }
         function Get-DotNetInstalledRuntimes { return @($script:channelRuntimes) }
         function Get-DevelopmentSdkRetention
         {
@@ -217,18 +284,26 @@ try
         }
 
         $multiPlan = @(Get-DevelopmentSdkPlan (Get-DevelopmentSdkVersions))
-        if ($multiPlan.Count -ne 2 -or @($multiPlan | Where-Object Update).Count -ne 2) { throw 'Multi-channel SDK plan failed across 10.0 and 11.0' }
+        if ($multiPlan.Count -ne 3 -or @($multiPlan | Where-Object Update).Count -ne 3) { throw 'Multi-channel SDK plan failed across 8.0, 10.0 and 11.0' }
 
+        $script:progressMessages.Clear()
         Update-DevelopmentSdk
-        if ('10.0.114' -notin $script:channelSdks -or '11.0.101' -notin $script:channelSdks -or '10.0.102' -notin $script:channelSdks -or '11.0.100' -notin $script:channelSdks)
+        if ('8.0.320' -notin $script:channelSdks -or '10.0.114' -notin $script:channelSdks -or '11.0.101' -notin $script:channelSdks -or '8.0.301' -notin $script:channelSdks -or '10.0.102' -notin $script:channelSdks -or '11.0.100' -notin $script:channelSdks)
         {
             throw 'Multi-channel servicing failed to install updates or lost pinned SDKs'
         }
-        if ($script:channelPolicies['10.0'] -ne 'nextSession' -or $script:channelPolicies['11.0'] -ne 'nextSession')
+        if ($script:channelPolicies['8.0'] -ne 'nextSession' -or $script:channelPolicies['10.0'] -ne 'nextSession' -or $script:channelPolicies['11.0'] -ne 'nextSession')
         {
             throw 'Per-channel retention policies were not restored after multi-channel servicing'
         }
+        if (-not @($script:progressMessages | Where-Object { $_ -like '*Проверка контрольной суммы SHA-512*' }).Count -or
+            -not @($script:progressMessages | Where-Object { $_ -like '*Проверка цифровой подписи Microsoft*' }).Count)
+        {
+            throw 'Update-DevelopmentSdk did not publish verification step progress'
+        }
 
+        Invoke-DotNetPackageOperation -Action Install -Kind Sdk -Channel '3.1'
+        if ('3.1.426' -notin $script:channelSdks) { throw '.NET Core 3.1 versioned-filename SDK install failed' }
         Invoke-DotNetPackageOperation -Action Install -Kind DesktopRuntime -Channel '11.0'
         Invoke-DotNetPackageOperation -Action Install -Kind AspNetCoreRuntime -Channel '11.0'
         Invoke-DotNetPackageOperation -Action Install -Kind Sdk -Channel '12.0'
@@ -256,13 +331,20 @@ try
                         Publisher = 'Microsoft Corporation'
                         SystemComponent = 0
                         QuietUninstallString = "`"$cachedExe`" /uninstall /quiet"
+                    },
+                    [pscustomobject]@{
+                        DisplayName = 'Microsoft .NET Core SDK 3.1.426 (x64)'
+                        Publisher = 'Microsoft Corporation'
+                        SystemComponent = 0
+                        QuietUninstallString = "`"$cachedExe`" /uninstall /quiet"
                     }
                 )
             }
 
             $script:executedInstallers.Clear()
             Invoke-DotNetPackageOperation -Action Uninstall -Kind Sdk -Channel '11.0' -Version '11.0.101'
-            if ($script:executedInstallers.Count -ne 1 -or $script:executedInstallers[0] -notlike 'dotnet-sdk-11.0.101-win-x64.exe|/uninstall /quiet /norestart*')
+            Invoke-DotNetPackageOperation -Action Uninstall -Kind Sdk -Channel '3.1' -Version '3.1.426'
+            if ($script:executedInstallers.Count -ne 2 -or $script:executedInstallers[0] -notlike 'dotnet-sdk-11.0.101-win-x64.exe|/uninstall /quiet /norestart*')
             {
                 throw 'Standalone Burn bundle uninstall did not invoke quiet norestart uninstaller'
             }
