@@ -4,6 +4,8 @@ namespace AIUpdater.Services;
 
 public interface IChangelogService
 {
+    event Action<ChangelogDocument>? DocumentUpdated;
+
     IChangelogRepository Repository { get; }
 
     IChangelogTranslator Translator { get; }
@@ -26,4 +28,8 @@ public interface IChangelogService
         ChangelogRelease release,
         CancellationToken cancellationToken,
         bool forceRetranslate = false);
+
+    Task PrefetchInstalledAsync(
+        IReadOnlyList<UpdateStage> stages,
+        CancellationToken cancellationToken);
 }

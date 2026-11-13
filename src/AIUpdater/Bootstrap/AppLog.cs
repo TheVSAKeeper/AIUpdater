@@ -95,6 +95,9 @@ internal static partial class AppLog
     [LoggerMessage(EventId = 1205, Level = LogLevel.Information, Message = "Запущено пакетное обновление выбранных компонентов ({SelectedCount})")]
     public static partial void BulkUpdateRequested(this ILogger logger, int selectedCount);
 
+    [LoggerMessage(EventId = 1206, Level = LogLevel.Information, Message = "Состояние компонента {StageId} изменено пользователем – отключён: {IsDisabled}")]
+    public static partial void ComponentDisabledChanged(this ILogger logger, string stageId, bool isDisabled);
+
     [LoggerMessage(EventId = 1210, Level = LogLevel.Information, Message = "Открыт файл или каталог журналов {Path}")]
     public static partial void ExternalLogOpened(this ILogger logger, string path);
 
@@ -181,6 +184,15 @@ internal static partial class AppLog
 
     [LoggerMessage(EventId = 1421, Level = LogLevel.Information, Message = "Переключён канал истории изменений {StageId}: {Channel} (видимых выпусков: {VisibleCount})")]
     public static partial void ChangelogChannelSwitched(this ILogger logger, string? stageId, ReleaseChannel channel, int visibleCount);
+
+    [LoggerMessage(EventId = 1422, Level = LogLevel.Information, Message = "Запущена фоновая предзагрузка истории изменений для {StageCount} установленных компонентов (автоперевод: {AutoTranslate})")]
+    public static partial void ChangelogPrefetchStarting(this ILogger logger, int stageCount, bool autoTranslate);
+
+    [LoggerMessage(EventId = 1423, Level = LogLevel.Information, Message = "Фоновая предзагрузка истории изменений завершена за {ElapsedMs} мс – обновлено: {LoadedCount}, переведено: {TranslatedCount}")]
+    public static partial void ChangelogPrefetchCompleted(this ILogger logger, int loadedCount, int translatedCount, long elapsedMs);
+
+    [LoggerMessage(EventId = 1424, Level = LogLevel.Warning, Message = "Не удалось выполнить фоновую предзагрузку истории изменений для компонента {StageId}")]
+    public static partial void ChangelogPrefetchStageFailed(this ILogger logger, Exception exception, string stageId);
 
     [LoggerMessage(EventId = 1500, Level = LogLevel.Information, Message = "Начат перевод выпуска {Version} через {BackendId} (модель: {Model}, уровень: {Effort}, частей: {ChunkCount}, повторно: {ForceRetranslate})")]
     public static partial void ReleaseTranslationStarting(this ILogger logger, string version, string backendId, string model, string effort, int chunkCount, bool forceRetranslate);

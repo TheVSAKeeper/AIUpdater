@@ -105,6 +105,7 @@ public sealed class UpdateStage : ObservableObject
     public required string Name { get; init; }
     public required string Vendor { get; init; }
     public bool CanManageInstallation { get; init; } = true;
+    public bool IsDisabled { get; private set; }
     public PackageStatus PackageStatus { get; private set; }
     public OperationState OperationState { get; private set; }
     public string? InstalledVersion { get; private set; }
@@ -115,8 +116,10 @@ public sealed class UpdateStage : ObservableObject
     public bool IsInstalled => PackageStatus != PackageStatus.NotInstalled
                                && (!string.IsNullOrWhiteSpace(InstalledVersion)
                                    || PackageStatus is PackageStatus.UpToDate or PackageStatus.UpdateAvailable or PackageStatus.DirectUpdate);
-    public bool CanSelectForUpdate => HasUpdate || PackageStatus == PackageStatus.DirectUpdate;
-    public bool CanUpdate => PackageStatus is PackageStatus.UpToDate or PackageStatus.UpdateAvailable or PackageStatus.Unknown or PackageStatus.DirectUpdate or PackageStatus.CheckFailed;
+    public bool IsEnabledForActions => !IsDisabled;
+    public bool CanInstallOrUninstall => !IsDisabled && CanManageInstallation;
+    public bool CanSelectForUpdate => !IsDisabled && (HasUpdate || PackageStatus == PackageStatus.DirectUpdate);
+    public bool CanUpdate => !IsDisabled && PackageStatus is PackageStatus.UpToDate or PackageStatus.UpdateAvailable or PackageStatus.Unknown or PackageStatus.DirectUpdate or PackageStatus.CheckFailed;
     public bool IsActiveOperation => OperationState is OperationState.Queued or OperationState.Checking or OperationState.Installing or OperationState.Updating or OperationState.Uninstalling;
 
     public string? CheckResult => PackageStatus switch
@@ -133,7 +136,7 @@ public sealed class UpdateStage : ObservableObject
     public bool IsSelectedForUpdate
     {
         get;
-        set => SetProperty(ref field, value);
+        set => SetProperty(ref field, !IsDisabled && value);
     }
 
     public string VersionDisplayText => InstalledVersion is null
@@ -152,14 +155,15 @@ public sealed class UpdateStage : ObservableObject
 
     public string AvailableVersionDisplayText => AvailableVersion ?? (HasUpdate ? "Не сообщается" : "–");
 
-    public Brush VersionBrush => PackageStatus == PackageStatus.UpToDate ? Brushes.MediumAquamarine : Brushes.LightSlateGray;
-    public Brush VersionTargetBrush => HasUpdate ? Brushes.Gold : VersionBrush;
-    public string CardActionName => CanSelectForUpdate ? $"Выбрать обновление: {Name}" : $"Проверить: {Name}";
+    public Brush VersionBrush => !IsDisabled && PackageStatus == PackageStatus.UpToDate ? Brushes.MediumAquamarine : Brushes.LightSlateGray;
+    public Brush VersionTargetBrush => !IsDisabled && HasUpdate ? Brushes.Gold : VersionBrush;
+    public string CardActionName => IsDisabled ? $"Отключено: {Name}" : CanSelectForUpdate ? $"Выбрать обновление: {Name}" : $"Проверить: {Name}";
 
-    public string ResultDescription => CheckedAt is null
-        ? "Проверка ещё не выполнялась"
-        : $"Последняя проверка: {CheckedAt.Value.ToLocalTime():dd.MM.yyyy HH:mm}\n{VersionDisplayText}"
-          + (string.IsNullOrWhiteSpace(Info) || Info == VersionDisplayText ? "" : $"\n{Info}");
+    public string ResultDescription => (IsDisabled ? "Компонент отключён вручную\n" : "")
+        + (CheckedAt is null
+            ? "Проверка ещё не выполнялась"
+            : $"Последняя проверка: {CheckedAt.Value.ToLocalTime():dd.MM.yyyy HH:mm}\n{VersionDisplayText}"
+              + (string.IsNullOrWhiteSpace(Info) || Info == VersionDisplayText ? "" : $"\n{Info}"));
 
     public string Status => OperationState switch
     {
@@ -170,6 +174,7 @@ public sealed class UpdateStage : ObservableObject
         OperationState.Uninstalling => "Удаление…",
         OperationState.Failed => "Ошибка выполнения",
         OperationState.Stopped => "Остановлено",
+        _ when IsDisabled => "Отключено",
         _ => PackageStatus switch
         {
             PackageStatus.NotInstalled => "Не установлено",
@@ -187,6 +192,7 @@ public sealed class UpdateStage : ObservableObject
         OperationState.Failed => Brushes.LightCoral,
         OperationState.Checking or OperationState.Installing or OperationState.Updating or OperationState.Uninstalling => Brushes.Aquamarine,
         OperationState.Queued or OperationState.Stopped => Brushes.LightSlateGray,
+        _ when IsDisabled => Brushes.LightSlateGray,
         _ => PackageStatus switch
         {
             PackageStatus.UpdateAvailable => Brushes.Gold,
@@ -260,6 +266,26 @@ public sealed class UpdateStage : ObservableObject
         Refresh();
     }
 
+    public void SetDisabled(bool disabled)
+    {
+        if (IsDisabled == disabled)
+        {
+            return;
+        }
+
+        IsDisabled = disabled;
+        if (disabled)
+        {
+            IsSelectedForUpdate = false;
+            if (!IsActiveOperation)
+            {
+                OperationState = OperationState.None;
+            }
+        }
+
+        Refresh();
+    }
+
     public void SetCheckResult(
         string result,
         string? installedVersion = null,
@@ -272,7 +298,7 @@ public sealed class UpdateStage : ObservableObject
         AvailableVersion = availableVersion;
         CheckedAt = checkedAt ?? DateTimeOffset.Now;
         Info = info;
-        IsSelectedForUpdate = HasUpdate;
+        IsSelectedForUpdate = !IsDisabled && HasUpdate;
         Refresh();
     }
 

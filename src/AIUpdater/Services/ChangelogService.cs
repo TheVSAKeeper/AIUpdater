@@ -32,6 +32,8 @@ public sealed class ChangelogService(
     {
     }
 
+    public event Action<ChangelogDocument>? DocumentUpdated;
+
     public IChangelogRepository Repository { get; } = repository;
 
     public IChangelogTranslator Translator { get; } = translator;
@@ -52,8 +54,11 @@ public sealed class ChangelogService(
     public ChangelogDocument? TryLoadCachedDocument(string stageId) =>
         Repository.TryLoad(stageId);
 
-    public void SaveCachedDocument(ChangelogDocument document) =>
+    public void SaveCachedDocument(ChangelogDocument document)
+    {
         Repository.Save(document);
+        DocumentUpdated?.Invoke(document);
+    }
 
     public List<ChangelogRelease> ParseReleases(string content, string format)
     {
@@ -86,7 +91,7 @@ public sealed class ChangelogService(
         {
             if (EnsureStageBuildCard(stage, source.Format, cached.Releases))
             {
-                Repository.Save(cached);
+                SaveCachedDocument(cached);
             }
 
             _logger.ChangelogServedFromFreshCache(stage.Id, cached.Releases.Count);
@@ -103,7 +108,7 @@ public sealed class ChangelogService(
                 EnsureStageBuildCard(stage, source.Format, cached.Releases);
                 await EnrichCompareReleasesAsync(cached.Releases, cancellationToken);
                 cached.UpdatedAt = DateTimeOffset.UtcNow;
-                Repository.Save(cached);
+                SaveCachedDocument(cached);
                 _logger.ChangelogDocumentUpdated(stage.Id, source.Format, cached.Releases.Count, true, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
                 return (cached, true);
             }
@@ -133,7 +138,7 @@ public sealed class ChangelogService(
                 Releases = merged,
             };
 
-            Repository.Save(document);
+            SaveCachedDocument(document);
             _logger.ChangelogDocumentUpdated(stage.Id, source.Format, merged.Count, false, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
             return (document, false);
         }
@@ -158,10 +163,142 @@ public sealed class ChangelogService(
         var translated = await Translator.TranslateReleaseAsync(release, cancellationToken, forceRetranslate);
         if (translated)
         {
-            Repository.Save(document);
+            SaveCachedDocument(document);
         }
 
         return translated;
+    }
+
+    public async Task PrefetchInstalledAsync(
+        IReadOnlyList<UpdateStage> stages,
+        CancellationToken cancellationToken)
+    {
+        var targets = stages.Where(stage => stage.IsInstalled && !stage.IsDisabled).ToArray();
+        if (targets.Length == 0)
+        {
+            return;
+        }
+
+        var startedAt = Stopwatch.GetTimestamp();
+        _logger.ChangelogPrefetchStarting(targets.Length, Translator.Settings.Current.Automatic);
+
+        var loaded = new List<(UpdateStage Stage, ChangelogDocument Document)>(targets.Length);
+        var loadedGate = new object();
+        using var throttle = new SemaphoreSlim(3, 3);
+        await Task.WhenAll(targets.Select(async stage =>
+        {
+            var acquired = false;
+            try
+            {
+                await throttle.WaitAsync(cancellationToken).ConfigureAwait(false);
+                acquired = true;
+                var (document, _) = await LoadDocumentAsync(stage, false, cancellationToken).ConfigureAwait(false);
+                lock (loadedGate)
+                {
+                    loaded.Add((stage, document));
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception exception)
+            {
+                _logger.ChangelogPrefetchStageFailed(exception, stage.Id);
+            }
+            finally
+            {
+                if (acquired)
+                {
+                    throttle.Release();
+                }
+            }
+        })).ConfigureAwait(false);
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        var orderedLoaded = targets
+            .Select(stage => loaded.FirstOrDefault(item => ReferenceEquals(item.Stage, stage)))
+            .Where(item => item.Document is not null)
+            .ToArray();
+
+        var translatedCount = 0;
+        if (Translator.Settings.Current.Automatic)
+        {
+            var reusableByHash = new Dictionary<string, ChangelogRelease>(StringComparer.Ordinal);
+            foreach (var (_, doc) in orderedLoaded)
+            {
+                foreach (var rel in doc.Releases)
+                {
+                    if (rel.HasTranslation && !rel.IsTranslationStale)
+                    {
+                        reusableByHash.TryAdd(TranslationProvenance.Hash(rel), rel);
+                    }
+                }
+            }
+
+            foreach (var (stage, document) in orderedLoaded)
+            {
+                if (cancellationToken.IsCancellationRequested || !Translator.Settings.Current.Automatic)
+                {
+                    break;
+                }
+
+                var channel = ChangelogFormatter.GetDefaultChannel(stage);
+                var visible = ChangelogFormatter.FilterReleasesByChannel(document.Releases, channel);
+                var latestCandidate = ChangelogFormatter.FindLatestAutoTranslateCandidate(visible);
+                if (latestCandidate is null)
+                {
+                    continue;
+                }
+
+                var hash = TranslationProvenance.Hash(latestCandidate);
+                if (reusableByHash.TryGetValue(hash, out var donor))
+                {
+                    CopyTranslation(donor, latestCandidate);
+                    SaveCachedDocument(document);
+                    translatedCount++;
+                    continue;
+                }
+
+                try
+                {
+                    if (await TranslateReleaseAsync(document, latestCandidate, cancellationToken, false).ConfigureAwait(false))
+                    {
+                        reusableByHash[hash] = latestCandidate;
+                        translatedCount++;
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception exception)
+                {
+                    _logger.ChangelogPrefetchStageFailed(exception, stage.Id);
+                }
+            }
+        }
+
+        _logger.ChangelogPrefetchCompleted(orderedLoaded.Length, translatedCount, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+    }
+
+    private static void CopyTranslation(ChangelogRelease source, ChangelogRelease target)
+    {
+        target.TranslatedTitle = source.TranslatedTitle;
+        target.TranslatedSummary = source.TranslatedSummary;
+        target.TranslatedGroups = source.TranslatedGroups?
+            .Select(group => new ChangelogGroup
+            {
+                Category = group.Category,
+                Title = group.Title,
+                Summary = group.Summary,
+                Items = [.. group.Items],
+            })
+            .ToList();
+        target.Translation = source.Translation;
     }
 
     private static bool IsCacheUpToDateForStage(ChangelogDocument cached, UpdateStage stage)

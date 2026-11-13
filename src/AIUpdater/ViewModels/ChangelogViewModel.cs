@@ -21,6 +21,7 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable, KeepShel
     private readonly UpdateStage[] _allStages;
     private readonly CollectionViewSource? _stagesViewSource;
     private readonly ChangelogPresentationState _state;
+    private readonly SynchronizationContext? _syncContext = SynchronizationContext.Current;
     private bool _suppressTextSync;
 
     [ActivatorUtilitiesConstructor]
@@ -44,6 +45,7 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable, KeepShel
         _changelogService = changelogService ?? new ChangelogService();
         _dialogService = dialogService;
         _changelogService.Translator.Settings.Changed += OnAgentChanged;
+        _changelogService.DocumentUpdated += OnDocumentUpdated;
         _allStages = stages.ToArray();
         _state = new ChangelogPresentationState(UpdateTranslationBannerLiveText, _logger);
 
@@ -306,7 +308,44 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable, KeepShel
         }
     }
 
-    public void Dispose() { _changelogService.Translator.Settings.Changed -= OnAgentChanged; _state.Dispose(); }
+    public void Dispose()
+    {
+        _changelogService.Translator.Settings.Changed -= OnAgentChanged;
+        _changelogService.DocumentUpdated -= OnDocumentUpdated;
+        _state.Dispose();
+    }
+
+    private void OnDocumentUpdated(ChangelogDocument document)
+    {
+        if (_syncContext is not null && SynchronizationContext.Current != _syncContext)
+        {
+            _syncContext.Post(_ => ApplyExternalDocumentUpdate(document), null);
+            return;
+        }
+
+        ApplyExternalDocumentUpdate(document);
+    }
+
+    private void ApplyExternalDocumentUpdate(ChangelogDocument document)
+    {
+        if (_state.IsBusy
+            || _state.CurrentStage is not { } current
+            || !string.Equals(current.Id, document.StageId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_state.CurrentDocument, document))
+        {
+            RenderDocument(document, current);
+            return;
+        }
+
+        ChangelogFormatter.AddDefaultCollapsedReleases(document.Releases, _state.CollapsedReleaseKeys);
+        RenderDocument(document, current);
+        var visibleCount = ChangelogFormatter.FilterReleasesByChannel(document.Releases, _state.SelectedChannel).Count;
+        LoadStatusText = $"Из кэша ({document.UpdatedAt.ToLocalTime():dd.MM.yyyy HH:mm}, выпусков: {visibleCount})";
+    }
 
     private void ToggleChannel() =>
         SetSelectedChannel(SelectedChannel == ReleaseChannel.Prerelease ? ReleaseChannel.Stable : ReleaseChannel.Prerelease);

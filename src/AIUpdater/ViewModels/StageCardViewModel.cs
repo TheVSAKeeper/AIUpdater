@@ -16,20 +16,28 @@ public sealed class StageCardViewModel : ObservableObject
         Func<UpdateStage, Task> onInstall,
         Func<UpdateStage, Task> onUninstall,
         Action<UpdateStage> onOpenChangelog,
-        Func<string?>? operationDetail = null)
+        Func<string?>? operationDetail = null,
+        Action<UpdateStage>? onToggleDisabled = null)
     {
         Stage = stage;
         _operationDetail = operationDetail ?? (() => null);
-        stage.PropertyChanged += (_, _) => RefreshOperationDetail();
+        stage.PropertyChanged += (_, _) =>
+        {
+            RefreshOperationDetail();
+            OnPropertyChanged(nameof(ToggleDisabledHeader));
+        };
         SelectOrCheckCommand = new AsyncRelayCommand(() => onSelectOrCheck(stage));
         CheckCommand = new AsyncRelayCommand(() => onCheck(stage));
         UpdateCommand = new AsyncRelayCommand(() => onUpdate(stage));
         InstallCommand = new AsyncRelayCommand(() => onInstall(stage));
         UninstallCommand = new AsyncRelayCommand(() => onUninstall(stage));
         OpenChangelogCommand = new RelayCommand(() => onOpenChangelog(stage));
+        ToggleDisabledCommand = new RelayCommand(() => onToggleDisabled?.Invoke(stage));
     }
 
     public UpdateStage Stage { get; }
+
+    public string ToggleDisabledHeader => Stage.IsDisabled ? "Включить компонент" : "Отключить компонент";
 
     public string OperationDetail
     {
@@ -55,4 +63,6 @@ public sealed class StageCardViewModel : ObservableObject
     public IAsyncRelayCommand UninstallCommand { get; }
 
     public IRelayCommand OpenChangelogCommand { get; }
+
+    public IRelayCommand ToggleDisabledCommand { get; }
 }

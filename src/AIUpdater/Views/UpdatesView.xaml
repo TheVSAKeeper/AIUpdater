@@ -4,8 +4,13 @@
              FontSize="{DynamicResource Font.Size.S}">
     <UserControl.Resources><BooleanToVisibilityConverter x:Key="BoolVisibility" /></UserControl.Resources>
     <Grid>
-        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-        <DockPanel Margin="0,0,0,12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <DockPanel Margin="0,0,0,10">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding CanStartRun, Converter={StaticResource BoolVisibility}}">
                 <Button x:Name="RunButton" Content="Проверить всё" Command="{Binding CheckAllCommand}" Margin="0,0,8,0" />
                 <Button x:Name="UpdateButton" Content="{Binding UpdateButtonText}" Command="{Binding UpdateSelectedCommand}" Style="{DynamicResource Button.Primary}" />
@@ -19,11 +24,27 @@
                            Visibility="{Binding IsRunning, Converter={StaticResource BoolVisibility}}" />
             </StackPanel>
         </DockPanel>
-        <Border x:Name="OperationPanel" Grid.Row="1" Margin="0,0,0,14"
+        <WrapPanel x:Name="UpdatesFilterBar" Grid.Row="1" Margin="0,0,0,8"
+                   Visibility="{Binding CanStartRun, Converter={StaticResource BoolVisibility}}">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,6">
+                <TextBlock Text="Группировка:" Foreground="{DynamicResource Fg.Muted}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox x:Name="GroupModeCombo" ItemsSource="{Binding GroupOptions}" SelectedItem="{Binding SelectedGroupOption}"
+                          MinWidth="152" VerticalAlignment="Center" AutomationProperties.Name="Группировка компонентов" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,6">
+                <TextBlock Text="Сортировка:" Foreground="{DynamicResource Fg.Muted}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox x:Name="SortModeCombo" ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SelectedSortOption}"
+                          MinWidth="168" VerticalAlignment="Center" AutomationProperties.Name="Сортировка компонентов" />
+            </StackPanel>
+            <CheckBox x:Name="HideUninstalledToggle" Content="Скрывать неустановленные" IsChecked="{Binding HideUninstalled}"
+                      VerticalAlignment="Center" Margin="0,0,0,6"
+                      ToolTip="Скрывать компоненты со статусом «Не установлено» и пропускать их при общей проверке" />
+        </WrapPanel>
+        <Border x:Name="OperationPanel" Grid.Row="2" Margin="0,0,0,14"
                 Visibility="{Binding IsRunning, Converter={StaticResource BoolVisibility}}">
             <ProgressBar Minimum="0" Maximum="{Binding ProgressMax}" Value="{Binding ProgressValue, Mode=OneWay}" Height="3" MinHeight="0" />
         </Border>
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="3">
             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
             <Grid>
                 <Grid.Style>
@@ -47,7 +68,7 @@
             </Grid>
             <ScrollViewer x:Name="ComponentsScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
-                    <ItemsControl x:Name="StageItemsControl" ItemsSource="{Binding Vendors}" Margin="0,0,0,6">
+                    <ItemsControl x:Name="StageItemsControl" ItemsSource="{Binding DisplayGroups}" Margin="0,0,0,6">
                         <ItemsControl.Style>
                             <Style TargetType="ItemsControl"><Style.Triggers>
                                 <DataTrigger Binding="{Binding ShowActiveOnly}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
@@ -57,7 +78,8 @@
                             <DataTemplate>
                                 <Border Margin="0,0,0,16">
                                     <StackPanel>
-                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource Fg.Muted}" Margin="14,0,0,8" />
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource Fg.Muted}" Margin="14,0,0,8"
+                                                   Visibility="{Binding ShowHeader, Converter={StaticResource BoolVisibility}}" />
                                         <Border Background="{DynamicResource Bg.Surface}" CornerRadius="6" BorderBrush="{DynamicResource Border.Subtle}" BorderThickness="1">
                                             <ItemsControl ItemsSource="{Binding Cards}" />
                                         </Border>
@@ -66,6 +88,11 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    <Border Background="{DynamicResource Bg.Surface}" CornerRadius="6" BorderBrush="{DynamicResource Border.Subtle}" BorderThickness="1"
+                            Padding="18,16" Visibility="{Binding ShowEmptyFilterHint, Converter={StaticResource BoolVisibility}}">
+                        <TextBlock Text="Нет отображаемых компонентов. Отключите переключатель «Скрывать неустановленные», чтобы показать весь каталог."
+                                   Foreground="{DynamicResource Fg.Muted}" TextWrapping="Wrap" />
+                    </Border>
                     <Border Background="{DynamicResource Bg.Surface}" CornerRadius="6" BorderBrush="{DynamicResource Border.Subtle}" BorderThickness="1"
                             Visibility="{Binding ShowActiveOnly, Converter={StaticResource BoolVisibility}}">
                         <ItemsControl x:Name="RunningItemsControl" ItemsSource="{Binding RunningCards}" />

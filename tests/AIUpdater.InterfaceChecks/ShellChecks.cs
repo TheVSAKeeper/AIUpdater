@@ -190,7 +190,10 @@ internal static partial class Program
             var menuButton = (Button)cards[0].FindName("CardMenuButton");
             menuButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
             var cardMenu = ((Border)cards[0].FindName("CardBorder")).ContextMenu;
-            Check(cardMenu.DataContext is StageCardViewModel && cardMenu.Items.OfType<MenuItem>().Count() == 5, "Card actions lost their shared context");
+            Check(cardMenu.DataContext is StageCardViewModel
+                  && cardMenu.Items.OfType<MenuItem>().Count() == 6
+                  && cardMenu.Items.OfType<MenuItem>().Any(item => Equals(item.Header, "Отключить компонент")),
+                "Card actions lost their shared context or disable menu action");
             cardMenu.IsOpen = false;
             var directChoices = Descendants<CheckBox>(updates).Where(box => box.DataContext is AIUpdater.Models.UpdateStage { PackageStatus: AIUpdater.Models.PackageStatus.DirectUpdate }).ToArray();
             Check(directChoices.Length == 2 && directChoices.All(box => box.IsChecked == false), "Direct updates became selected automatically");

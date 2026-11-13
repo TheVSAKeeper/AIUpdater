@@ -140,12 +140,13 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
 
     public void RefreshVendorSummary(VendorStatus vendor)
     {
-        var errors = vendor.Stages.Count(stage => stage.OperationState == OperationState.Failed || stage.PackageStatus == PackageStatus.CheckFailed);
-        var stopped = vendor.Stages.Count(stage => stage.OperationState == OperationState.Stopped);
-        var updates = vendor.Stages.Count(stage => stage.HasUpdate);
+        var activeStages = vendor.Stages.Where(stage => !stage.IsDisabled).ToArray();
+        var errors = activeStages.Count(stage => stage.OperationState == OperationState.Failed || stage.PackageStatus == PackageStatus.CheckFailed);
+        var stopped = activeStages.Count(stage => stage.OperationState == OperationState.Stopped);
+        var updates = activeStages.Count(stage => stage.HasUpdate);
         vendor.SetStatus(
             errors > 0 ? $"Ошибок: {errors}" : stopped > 0 ? "Остановлено" : updates > 0 ? $"Обновлений: {updates}" : "",
-            UpdaterOutputParser.BuildCheckSummary(vendor.Stages),
+            UpdaterOutputParser.BuildCheckSummary(activeStages),
             errors > 0 ? Brushes.LightCoral : updates > 0 ? Brushes.Gold : Brushes.LightSlateGray);
     }
 
@@ -190,7 +191,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
                 ? "Обновление остановлено"
                 : $"Завершено с ошибками (код {exitCode})"
             : checkOnly
-                ? UpdaterOutputParser.BuildCheckSummary(allStages.Where(stage => requestedStage is null || stage == requestedStage))
+                ? UpdaterOutputParser.BuildCheckSummary(requestedStage is null ? runStages : [requestedStage])
                 : $"{operationName}: завершено" + (requestedStage is null ? "" : $" – {requestedStage.Name}");
 
         foreach (var stage in runStages.Where(stage => stage.IsActiveOperation))
@@ -311,14 +312,19 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
         _logger.UpdaterRunStarting(action, checkOnly, runStages.Length, activeVendors.Length, isBulkSelection);
         var results = await Task.WhenAll(activeVendors.Select(async vendor =>
         {
-            if (!isBulkSelection)
+            var vendorRunStages = runStages.Where(stage => stage.Vendor == vendor).ToArray();
+            var allVendorStagesCount = allStages.Count(stage => stage.Vendor == vendor);
+            var canRunWholeVendor = !isBulkSelection
+                                    && requestedStage is null
+                                    && vendorRunStages.Length == allVendorStagesCount;
+            if (canRunWholeVendor)
             {
                 var (code, vendorErr) = await RunVendorAsync(
                     allStages,
                     vendors,
                     runStages,
                     vendor,
-                    requestedStage,
+                    null,
                     action,
                     checkOnly,
                     isStopRequested,
@@ -333,7 +339,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
             }
 
             var result = 0;
-            foreach (var stage in runStages.Where(stage => stage.Vendor == vendor))
+            foreach (var stage in vendorRunStages)
             {
                 if (isStopRequested())
                 {

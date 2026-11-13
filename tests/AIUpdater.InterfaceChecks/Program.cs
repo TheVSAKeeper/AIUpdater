@@ -871,6 +871,7 @@ internal static partial class Program
         CheckChangelog(output, viewModel.Stages, provider);
         CheckTranslationAgentSettings(output);
         CheckAgentTranslation(output);
+        CheckUpdatesGroupingFilteringAndPrefetch(visualHost, window, shell, output);
         var fixture = Path.Combine(output, "fixture.ps1");
         var calls = Path.Combine(output, "calls.txt");
         File.WriteAllText(calls, "");

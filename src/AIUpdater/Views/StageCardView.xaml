@@ -12,6 +12,7 @@
                 <Setter Property="BorderBrush" Value="Transparent" />
                 <Style.Triggers>
                     <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /></Trigger>
+                    <DataTrigger Binding="{Binding Stage.IsDisabled}" Value="True"><Setter Property="Opacity" Value="0.55" /></DataTrigger>
                     <DataTrigger Binding="{Binding Stage.OperationState}" Value="{x:Static models:OperationState.Checking}"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /><Setter Property="BorderBrush" Value="{DynamicResource Accent.Primary}" /></DataTrigger>
                     <DataTrigger Binding="{Binding Stage.OperationState}" Value="{x:Static models:OperationState.Updating}"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /><Setter Property="BorderBrush" Value="{DynamicResource Accent.Primary}" /></DataTrigger>
                     <DataTrigger Binding="{Binding Stage.OperationState}" Value="{x:Static models:OperationState.Installing}"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /><Setter Property="BorderBrush" Value="{DynamicResource Accent.Primary}" /></DataTrigger>
@@ -21,11 +22,12 @@
         </Border.Style>
         <Border.ContextMenu>
             <ContextMenu>
-                <MenuItem Header="Проверить" Command="{Binding CheckCommand}" />
+                <MenuItem Header="Проверить" Command="{Binding CheckCommand}" IsEnabled="{Binding Stage.IsEnabledForActions}" />
                 <MenuItem Header="Обновить" Command="{Binding UpdateCommand}" IsEnabled="{Binding Stage.CanUpdate}" />
-                <MenuItem Header="Установить" Command="{Binding InstallCommand}" IsEnabled="{Binding Stage.CanManageInstallation}" />
-                <MenuItem Header="Удалить" Command="{Binding UninstallCommand}" IsEnabled="{Binding Stage.CanManageInstallation}" />
+                <MenuItem Header="Установить" Command="{Binding InstallCommand}" IsEnabled="{Binding Stage.CanInstallOrUninstall}" />
+                <MenuItem Header="Удалить" Command="{Binding UninstallCommand}" IsEnabled="{Binding Stage.CanInstallOrUninstall}" />
                 <Separator />
+                <MenuItem Header="{Binding ToggleDisabledHeader}" Command="{Binding ToggleDisabledCommand}" />
                 <MenuItem Header="Что нового" Command="{Binding OpenChangelogCommand}" />
             </ContextMenu>
         </Border.ContextMenu>
@@ -42,13 +44,14 @@
             <Grid Grid.Column="1" Margin="0,0,10,0">
                 <Button Command="{Binding DataContext.SelectOrCheckCommand, RelativeSource={RelativeSource AncestorType=views:StageCardView}}"
                         IsEnabled="{Binding DataContext.CanStartRun, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}"
+                        IsHitTestVisible="{Binding IsEnabledForActions}"
                         Background="Transparent" BorderThickness="0" HorizontalAlignment="Stretch" Padding="0" MinHeight="20"
                         ToolTip="{Binding ResultDescription}" AutomationProperties.Name="{Binding CardActionName}" />
                 <StackPanel VerticalAlignment="Center" IsHitTestVisible="False">
                     <TextBlock x:Name="StageTitle" Text="{Binding Name}"
                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
                     <TextBlock Text="{Binding Vendor}" FontSize="{DynamicResource Font.Size.XS}" Foreground="{DynamicResource Fg.Muted}" Margin="0,2,0,0"
-                               Visibility="{Binding DataContext.ShowActiveOnly, RelativeSource={RelativeSource AncestorType=views:UpdatesView}, Converter={StaticResource BoolVisibility}}" />
+                               Visibility="{Binding DataContext.ShowVendorSubtitle, RelativeSource={RelativeSource AncestorType=views:UpdatesView}, Converter={StaticResource BoolVisibility}}" />
                 </StackPanel>
             </Grid>
             <TextBlock Grid.Column="2" Text="{Binding InstalledVersion, TargetNullValue=–}" Foreground="{DynamicResource Fg.Secondary}"

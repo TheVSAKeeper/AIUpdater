@@ -38,6 +38,7 @@ public sealed class ChangelogPresentationState : IDisposable
     private int _translatingGroupCount;
     private int _translatingItemCount;
     private DateTimeOffset _translationStartedAt;
+    private bool _isLoadingStage;
 
     public ChangelogPresentationState(Action onTimerTick, ILogger? logger = null)
     {
@@ -69,6 +70,8 @@ public sealed class ChangelogPresentationState : IDisposable
     public DateTimeOffset TranslationStartedAt => _translationStartedAt;
 
     public CancellationToken ActiveLoadToken => _loadCancellation?.Token ?? CancellationToken.None;
+
+    public bool IsBusy => _isLoadingStage || _translatingReleaseKey is not null;
 
     public static void SetCollapsedKey(HashSet<string> keys, string key, bool isCollapsed)
     {
@@ -179,6 +182,7 @@ public sealed class ChangelogPresentationState : IDisposable
         Action onTranslated)
     {
         var token = BeginStageLoad(stage);
+        _isLoadingStage = true;
         var cached = service.TryLoadCachedDocument(stage.Id);
         if (cached is not null)
         {
@@ -208,9 +212,7 @@ public sealed class ChangelogPresentationState : IDisposable
             onScrollHome();
 
             var visibleReleases = ChangelogFormatter.FilterReleasesByChannel(document.Releases, SelectedChannel);
-            var latestToTranslate = visibleReleases
-                .Take(2)
-                .FirstOrDefault(release => (!release.HasTranslation || release.IsTranslationStale) && !ChangelogFormatter.IsPrimarilyRussian(release));
+            var latestToTranslate = ChangelogFormatter.FindLatestAutoTranslateCandidate(visibleReleases);
             var statusPrefix = fromCacheOnly
                 ? $"Из кэша ({document.UpdatedAt.ToLocalTime():dd.MM.yyyy HH:mm}, выпусков: {visibleReleases.Count})"
                 : $"Загружено выпусков: {visibleReleases.Count}";
@@ -248,6 +250,13 @@ public sealed class ChangelogPresentationState : IDisposable
 
             onStatus("Не удалось загрузить изменения. Можно открыть официальный источник.");
             onFallbackText(exception.Message);
+        }
+        finally
+        {
+            if (!token.IsCancellationRequested && ReferenceEquals(CurrentStage, stage))
+            {
+                _isLoadingStage = false;
+            }
         }
     }
 
@@ -441,6 +450,16 @@ public static class ChangelogFormatter
         return releases
             .Where(r => channel == ReleaseChannel.Prerelease ? r.IsPrerelease : !r.IsPrerelease)
             .ToList();
+    }
+
+    public static ChangelogRelease? FindLatestAutoTranslateCandidate(IReadOnlyList<ChangelogRelease> visibleReleases)
+    {
+        var latestEnglish = visibleReleases
+            .Take(2)
+            .FirstOrDefault(release => !IsPrimarilyRussian(release));
+        return latestEnglish is not null && (!latestEnglish.HasTranslation || latestEnglish.IsTranslationStale)
+            ? latestEnglish
+            : null;
     }
 
     public static string FormatChannelToggleText(ReleaseChannel channel, ChangelogDocument? document)
