@@ -1,4 +1,8 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Windows;
@@ -11,18 +15,21 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
     private readonly IStageResultStore _resultStore;
     private readonly IUpdaterProcessRunner _processRunner;
     private readonly UpdaterOutputParser _outputParser;
+    private readonly ILogger _logger;
 
     public UpdaterExecutionService(
         IStageResultStore resultStore,
         IUpdaterProcessRunner processRunner,
         UpdaterOutputParser outputParser,
-        AIUpdater.Bootstrap.AppPaths? paths = null)
+        AppPaths? paths = null,
+        ILogger<UpdaterExecutionService>? logger = null)
     {
         _resultStore = resultStore;
         _processRunner = processRunner;
         _outputParser = outputParser;
+        _logger = logger ?? NullLogger<UpdaterExecutionService>.Instance;
 
-        paths ??= AIUpdater.Bootstrap.AppPaths.Default;
+        paths ??= AppPaths.Default;
         LogDirectory = paths.LogsDirectory;
         try
         {
@@ -30,6 +37,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            _logger.LogDirectoryCreateFailed(exception, LogDirectory);
         }
 
         ScriptPath = Path.Combine(paths.ScriptDirectory, "Update-Codex.ps1");
@@ -90,6 +98,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            _logger.PreviousLogReadFailed(exception, path);
             return null;
         }
     }
@@ -195,6 +204,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
         }
 
         SaveResults(allStages, onError);
+        _logger.UpdaterRunFinished(action, checkOnly, exitCode, sawError, stopRequested, statusText);
         return statusText;
     }
 
@@ -276,14 +286,29 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
         foreach (var vendor in vendors.Where(item => runStages.Any(stage => stage.Vendor == item.Name)))
         {
             vendor.Log = "";
-            File.WriteAllText(vendor.LogPath, $"{vendor.Name}: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}" + Environment.NewLine, Encoding.UTF8);
+            try
+            {
+                File.WriteAllText(vendor.LogPath, $"{vendor.Name}: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}" + Environment.NewLine, Encoding.UTF8);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                _logger.RunLogResetFailed(exception, vendor.LogPath);
+            }
             vendor.SetStatus("Ожидание", "Подготовка к запуску", Brushes.LightSlateGray);
         }
 
-        File.WriteAllText(LogPath, $"AI update run: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}" + Environment.NewLine, Encoding.UTF8);
+        try
+        {
+            File.WriteAllText(LogPath, $"AI update run: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}" + Environment.NewLine, Encoding.UTF8);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.RunLogResetFailed(exception, LogPath);
+        }
 
         var sawError = false;
         var activeVendors = runStages.Select(stage => stage.Vendor).Distinct().ToArray();
+        _logger.UpdaterRunStarting(action, checkOnly, runStages.Length, activeVendors.Length, isBulkSelection);
         var results = await Task.WhenAll(activeVendors.Select(async vendor =>
         {
             if (!isBulkSelection)
@@ -365,8 +390,12 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            _logger.RunLogResetFailed(exception, LogPath);
         }
 
+        var kindName = DotNetPackageEntry.GetScriptKindName(operation.Kind);
+        var startedAt = Stopwatch.GetTimestamp();
+        _logger.DotNetOperationStarting(operation.ActionScriptName, kindName, operation.Channel, operation.Version, operation.IncludePrerelease);
         requestedStage?.SetRunning(operationState);
         vendorStatus.SetStatus(operationName, operation.DisplayLabel, AccentTextBrush);
         var run = new VendorRun(vendor, runStages)
@@ -381,7 +410,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
             operation.ActionScriptName,
             false,
             requestedStage?.Id,
-            DotNetPackageEntry.GetScriptKindName(operation.Kind),
+            kindName,
             operation.Channel,
             operation.Version,
             operation.IncludePrerelease);
@@ -418,6 +447,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
         catch (Exception exception)
         {
             run.SawError = true;
+            _logger.VendorRunFailed(exception, vendor, operation.ActionScriptName);
             appendLine(exception.Message, vendor);
         }
         finally
@@ -445,12 +475,14 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
                         : "Завершено с ошибками" + (exitCode == 0 ? "" : $" (код {exitCode})"),
                 stopped ? Brushes.LightSlateGray : successful ? AccentTextBrush : Brushes.LightCoral);
             appendLine(vendorStatus.Detail, vendor);
+            _logger.DotNetOperationFinished(operation.ActionScriptName, kindName, operation.Channel, exitCode, run.SawError, stopped, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
             try
             {
                 File.Delete(temporaryLog);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
+                _logger.TempLogDeleteFailed(exception, temporaryLog);
             }
         }
 
@@ -515,6 +547,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
         catch (Exception exception)
         {
             run.SawError = true;
+            _logger.VendorRunFailed(exception, vendor, action);
             appendLine(exception.Message, vendor);
         }
         finally
@@ -526,6 +559,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
                 {
                     stage.SetFailed();
                     run.SawError = true;
+                    _logger.VendorStageResultMissing(vendor, stage.Id);
                     appendLine($"Скрипт не передал результат: {stage.Name}", vendor);
                 }
             }
@@ -571,6 +605,7 @@ public sealed class UpdaterExecutionService : IUpdaterExecutionService
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
+                _logger.TempLogDeleteFailed(exception, temporaryLog);
             }
         }
 

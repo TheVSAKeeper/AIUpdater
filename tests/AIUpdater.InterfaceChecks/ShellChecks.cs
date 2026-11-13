@@ -170,6 +170,8 @@ internal static partial class Program
               && typeof(IView<DotNetPackageRowViewModel>).IsAssignableFrom(typeof(DotNetPackageRowView))
               && typeof(IView<ChangelogViewModel>).IsAssignableFrom(typeof(ChangelogView))
               && typeof(IView<LogPanelViewModel>).IsAssignableFrom(typeof(LogsView))
+              && typeof(IView<LogsViewModel>).IsAssignableFrom(typeof(KeepShell.Views.LogsView))
+              && typeof(IView<DiagnosticsViewModel>).IsAssignableFrom(typeof(KeepShell.Views.DiagnosticsView))
               && typeof(IView<SettingsViewModel>).IsAssignableFrom(typeof(SettingsView)), "Page pairs are not declared for the KeepShell generator");
         var updates = Descendants<UpdatesView>(window).Single();
         foreach (var (width, height) in new[] { (1200, 800), (1000, 700) })
@@ -258,6 +260,31 @@ internal static partial class Program
             Click((Button)logs.FindName("LogZoomOutButton"));
             Render((FrameworkElement)window.Content, Path.Combine(output, $"shell-logs-{width}.png"), width, height);
 
+            Await(Task.Delay(260));
+            shell.Navigate(SectionKey.AppLogs);
+            host.Settle();
+            var appLogs = Descendants<KeepShell.Views.LogsView>(window).Single();
+            Check(appLogs.IsVisible && ReferenceEquals(appLogs.DataContext, shell.AppLogs), "Generated framework logs view did not open");
+            Check(shell.EffectivePageHeader?.PageTitle == "Логи", "Framework logs page header was not exposed through ShellViewModel");
+            Check(shell.AppLogs.Items.Any(item => item.SourceContext == typeof(App).FullName && item.Message.Contains("Оболочка AI Updater запущена")),
+                "Startup [LoggerMessage] event did not reach WpfLogSink");
+            Check(shell.AppLogs.Items.Any(item => item.SourceContext == typeof(DotNetPackageService).FullName && item.Message.Contains("Каталог .NET собран")),
+                ".NET catalog [LoggerMessage] event did not reach WpfLogSink");
+            Check(shell.AppLogs.Items.Any(item => item.SourceContext == typeof(UpdaterOutputParser).FullName && item.Message.Contains("Некорректный пакет UI_RESULT")),
+                "Parser warning [LoggerMessage] event did not reach WpfLogSink");
+            Check(shell.AppLogs.Items.Any(item => item.SourceContext == typeof(FileStageResultStore).FullName && item.Message.Contains("Восстановлены результаты проверки")),
+                "Result store [LoggerMessage] event did not reach WpfLogSink");
+            Render((FrameworkElement)window.Content, Path.Combine(output, $"shell-app-logs-{width}.png"), width, height);
+
+            shell.Navigate(SectionKey.Diagnostics);
+            host.Settle();
+            var diagnostics = Descendants<KeepShell.Views.DiagnosticsView>(window).Single();
+            Check(diagnostics.IsVisible && ReferenceEquals(diagnostics.DataContext, shell.Diagnostics), "Generated framework diagnostics view did not open");
+            Check(shell.EffectivePageHeader?.PageTitle == "Диагностика", "Framework diagnostics page header was not exposed through ShellViewModel");
+            Check(!shell.Diagnostics.StartupText.Contains("не измерялся", StringComparison.OrdinalIgnoreCase), "Diagnostics page did not display reported startup duration");
+            Check(Descendants<ScrollViewer>(diagnostics).All(viewer => viewer.ScrollableWidth <= 1), "Diagnostics page overflows horizontally");
+            Render((FrameworkElement)window.Content, Path.Combine(output, $"shell-diagnostics-{width}.png"), width, height);
+
             shell.ShowSettings();
             host.Settle();
             var settingsView = Descendants<SettingsView>(window).Single();
@@ -295,6 +322,14 @@ internal static partial class Program
         Check(Descendants<ScrollViewer>(scaledDotNet).All(viewer => viewer.ExtentWidth <= viewer.ViewportWidth + 1 && viewer.ScrollableWidth <= 1),
             "Font scaling caused horizontal overflow in the .NET manager");
         Render((FrameworkElement)window.Content, Path.Combine(output, "shell-dotnet-1000-160.png"), 1000, 700);
+        shell.Navigate(SectionKey.AppLogs);
+        host.Settle();
+        Render((FrameworkElement)window.Content, Path.Combine(output, "shell-app-logs-1000-160.png"), 1000, 700);
+        shell.Navigate(SectionKey.Diagnostics);
+        host.Settle();
+        var scaledDiagnostics = Descendants<KeepShell.Views.DiagnosticsView>(window).Single();
+        Check(Descendants<ScrollViewer>(scaledDiagnostics).All(viewer => viewer.ScrollableWidth <= 1), "Font scaling caused horizontal overflow in Diagnostics");
+        Render((FrameworkElement)window.Content, Path.Combine(output, "shell-diagnostics-1000-160.png"), 1000, 700);
         shell.Navigate(SectionKey.Updates);
         shell.Preferences.FontScale = 1;
         host.Settle();

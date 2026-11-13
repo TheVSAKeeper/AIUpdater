@@ -1,4 +1,7 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -14,10 +17,12 @@ public sealed class ChangelogContentFetcher : IChangelogContentFetcher
     private const long MaxResponseBufferBytes = 32L * 1024 * 1024;
     private static readonly HttpClient SharedClient = CreateClient();
     private readonly HttpClient _client;
+    private readonly ILogger _logger;
 
-    public ChangelogContentFetcher(HttpClient? client = null)
+    public ChangelogContentFetcher(HttpClient? client = null, ILogger<ChangelogContentFetcher>? logger = null)
     {
         _client = client ?? SharedClient;
+        _logger = logger ?? NullLogger<ChangelogContentFetcher>.Instance;
     }
 
     public async Task<string> FetchAsync(ChangelogSource source, CancellationToken cancellationToken)
@@ -48,21 +53,27 @@ public sealed class ChangelogContentFetcher : IChangelogContentFetcher
             request.Headers.IfNoneMatch.Add(etagValue);
         }
 
+        var startedAt = Stopwatch.GetTimestamp();
         try
         {
             using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (response.StatusCode == HttpStatusCode.NotModified)
             {
+                _logger.ChangelogHttpNotModified(source.DownloadUrl);
                 return ("", cachedETag, true);
             }
 
             response.EnsureSuccessStatusCode();
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            return (content, response.Headers.ETag?.ToString(), false);
+            var etag = response.Headers.ETag?.ToString();
+            _logger.ChangelogHttpFetched(source.DownloadUrl, content.Length, etag is not null, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+            return (content, etag, false);
         }
-        catch (HttpRequestException) when ((source.Format is "github" or "github-releases" or "antigravity-cli") && source.PageUrl is not null)
+        catch (HttpRequestException exception) when ((source.Format is "github" or "github-releases" or "antigravity-cli") && source.PageUrl is not null)
         {
-            var atomContent = await DownloadUrlAsync(source.PageUrl.TrimEnd('/') + ".atom", cancellationToken);
+            var atomUrl = source.PageUrl.TrimEnd('/') + ".atom";
+            _logger.ChangelogHttpFallbackToAtom(exception, source.DownloadUrl, atomUrl);
+            var atomContent = await DownloadUrlAsync(atomUrl, cancellationToken);
             return (atomContent, null, false);
         }
     }
@@ -109,6 +120,7 @@ public sealed class ChangelogContentFetcher : IChangelogContentFetcher
             process.StartInfo.ArgumentList.Add(argument);
         }
 
+        var startedAt = Stopwatch.GetTimestamp();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
         try
@@ -122,10 +134,13 @@ public sealed class ChangelogContentFetcher : IChangelogContentFetcher
                 throw new InvalidDataException($"{Path.GetFileNameWithoutExtension(executable)}: {await error}");
             }
 
-            return (await output).Trim();
+            var trimmed = (await output).Trim();
+            _logger.ExternalCommandCompleted(Path.GetFileName(executable), arguments.Count, trimmed.Length, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+            return trimmed;
         }
         catch (OperationCanceledException)
         {
+            _logger.ExternalCommandTimedOutOrCancelled(Path.GetFileName(executable), timeoutSeconds);
             try
             {
                 if (!process.HasExited)

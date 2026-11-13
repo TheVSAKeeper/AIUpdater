@@ -1,12 +1,17 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.IO;
 using System.Text;
 using System.Text.Json;
 
 namespace AIUpdater.Services;
 
-public sealed class FileStageResultStore(string? resultsPath = null) : IStageResultStore
+public sealed class FileStageResultStore(string? resultsPath = null, ILogger<FileStageResultStore>? logger = null) : IStageResultStore
 {
+    private readonly ILogger _logger = logger ?? NullLogger<FileStageResultStore>.Instance;
+
     public string ResultsPath { get; set; } = resultsPath ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "AIUpdater",
@@ -24,6 +29,7 @@ public sealed class FileStageResultStore(string? resultsPath = null) : IStageRes
         try
         {
             var results = JsonSerializer.Deserialize<PackageResult[]>(File.ReadAllText(ResultsPath, Encoding.UTF8));
+            var restored = 0;
             foreach (var result in results ?? [])
             {
                 if (result is null || result.CheckedAt is null || !UpdateStage.TryParseCheckResult(result.Result, out _))
@@ -31,12 +37,21 @@ public sealed class FileStageResultStore(string? resultsPath = null) : IStageRes
                     continue;
                 }
 
-                stageList.FirstOrDefault(stage => stage.Id == result.Stage)
-                    ?.SetCheckResult(result.Result, result.Installed, result.Available, result.CheckedAt, result.Info);
+                if (stageList.FirstOrDefault(stage => stage.Id == result.Stage) is { } target)
+                {
+                    target.SetCheckResult(result.Result, result.Installed, result.Available, result.CheckedAt, result.Info);
+                    restored++;
+                }
+            }
+
+            if (restored > 0)
+            {
+                _logger.StageResultsLoaded(restored, ResultsPath);
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
+            _logger.StageResultsLoadFailed(exception, ResultsPath);
             onError?.Invoke($"Не удалось загрузить результаты: {exception.Message}");
         }
     }
@@ -73,9 +88,12 @@ public sealed class FileStageResultStore(string? resultsPath = null) : IStageRes
             {
                 File.WriteAllText(ResultsPath, json, Encoding.UTF8);
             }
+
+            _logger.StageResultsSaved(results.Length, ResultsPath);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            _logger.StageResultsSaveFailed(exception, ResultsPath);
             onError?.Invoke($"Не удалось сохранить результаты: {exception.Message}");
         }
     }

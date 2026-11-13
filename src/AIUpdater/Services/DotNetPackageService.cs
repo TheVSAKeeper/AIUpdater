@@ -1,6 +1,9 @@
 ﻿using AIUpdater.Bootstrap;
 using AIUpdater.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Win32;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -33,16 +36,19 @@ public sealed class DotNetPackageService : IDotNetPackageService
     private readonly AppPaths _paths;
     private readonly Func<IReadOnlyList<DotNetStandaloneBundle>> _bundleReader;
     private readonly Func<string?> _dotNetPathResolver;
+    private readonly ILogger _logger;
 
     public DotNetPackageService(
         IChangelogContentFetcher fetcher,
         AppPaths paths,
         Func<IReadOnlyList<DotNetStandaloneBundle>>? bundleReader = null,
-        Func<string?>? dotNetPathResolver = null)
+        Func<string?>? dotNetPathResolver = null,
+        ILogger<DotNetPackageService>? logger = null)
     {
         _fetcher = fetcher;
         _paths = paths;
-        _bundleReader = bundleReader ?? ReadWindowsStandaloneBundles;
+        _logger = logger ?? NullLogger<DotNetPackageService>.Instance;
+        _bundleReader = bundleReader ?? (() => ReadWindowsStandaloneBundles(_logger));
         _dotNetPathResolver = dotNetPathResolver ?? ResolveDefaultDotNetExecutable;
     }
 
@@ -51,6 +57,8 @@ public sealed class DotNetPackageService : IDotNetPackageService
         bool includePrerelease,
         CancellationToken cancellationToken)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+        _logger.DotNetCatalogLoading(forceRefresh, includePrerelease);
         var (installedSdks, installedRuntimes) = await ReadLocalCliInventoryAsync(cancellationToken);
         var bundles = SafeReadBundles();
 
@@ -62,6 +70,7 @@ public sealed class DotNetPackageService : IDotNetPackageService
         if (!forceRefresh && TryReadFreshCache(indexCacheFile, out var freshIndex))
         {
             indexJson = freshIndex;
+            _logger.DotNetIndexLoadedFromFreshCache(indexCacheFile);
         }
         else
         {
@@ -77,16 +86,18 @@ public sealed class DotNetPackageService : IDotNetPackageService
                     indexJson = staleIndex;
                     offlineFallback = true;
                     warning = "Показан сохранённый каталог выпусков Microsoft (сеть недоступна).";
+                    _logger.DotNetIndexFallbackToStaleCache(ex, indexCacheFile);
                 }
                 else
                 {
                     offlineFallback = true;
                     warning = $"Не удалось загрузить каталог Microsoft ({ex.Message}). Показаны только локально установленные компоненты.";
+                    _logger.DotNetIndexOfflineWithoutCache(ex);
                 }
             }
         }
 
-        var indexEntries = indexJson is not null ? ParseReleasesIndex(indexJson) : [];
+        var indexEntries = indexJson is not null ? ParseReleasesIndex(indexJson, _logger) : [];
         var localChannels = installedSdks.Select(DotNetVersionComparer.TryGetChannel).OfType<string>()
             .Concat(installedRuntimes.Select(rt => DotNetVersionComparer.TryGetChannel(rt.Version)).OfType<string>())
             .ToHashSet(StringComparer.Ordinal);
@@ -104,9 +115,14 @@ public sealed class DotNetPackageService : IDotNetPackageService
             async channelName =>
             {
                 if (!indexByChannel.TryGetValue(channelName, out var meta)
-                    || meta.ReleasesJsonUrl is not { } detailUrl
-                    || !IsTrustedMetadataUrl(detailUrl))
+                    || meta.ReleasesJsonUrl is not { } detailUrl)
                 {
+                    return (ChannelReleaseDetail?)null;
+                }
+
+                if (!IsTrustedMetadataUrl(detailUrl))
+                {
+                    _logger.DotNetChannelMetadataUntrustedUrl(channelName, detailUrl);
                     return (ChannelReleaseDetail?)null;
                 }
 
@@ -141,6 +157,7 @@ public sealed class DotNetPackageService : IDotNetPackageService
             .OrderBy(GetChannelSortPriority)
             .ThenByDescending(ch => ParseChannelSortKey(ch.Channel))
             .ToArray();
+        _logger.DotNetCatalogLoaded(ordered.Length, installedSdks.Count, installedRuntimes.Count, bundles.Count, offlineFallback, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
         return new DotNetCatalogSnapshot(ordered, DateTimeOffset.Now, offlineFallback, warning);
     }
 
@@ -152,7 +169,7 @@ public sealed class DotNetPackageService : IDotNetPackageService
         _ => 1,
     };
 
-    public static IReadOnlyList<DotNetStandaloneBundle> ReadWindowsStandaloneBundles()
+    public static IReadOnlyList<DotNetStandaloneBundle> ReadWindowsStandaloneBundles(ILogger? logger = null)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -231,6 +248,7 @@ public sealed class DotNetPackageService : IDotNetPackageService
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
             {
+                logger?.DotNetRegistryScanFailed(ex);
             }
         }
 
@@ -267,8 +285,9 @@ public sealed class DotNetPackageService : IDotNetPackageService
         {
             return _bundleReader();
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.DotNetRegistryScanFailed(ex);
             return [];
         }
     }
@@ -278,6 +297,7 @@ public sealed class DotNetPackageService : IDotNetPackageService
         var dotNetExe = _dotNetPathResolver();
         if (string.IsNullOrWhiteSpace(dotNetExe))
         {
+            _logger.DotNetCliNotFound();
             return ([], []);
         }
 
@@ -302,6 +322,7 @@ public sealed class DotNetPackageService : IDotNetPackageService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            _logger.DotNetCliInventoryFailed(ex, "--list-sdks");
         }
 
         try
@@ -331,6 +352,7 @@ public sealed class DotNetPackageService : IDotNetPackageService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            _logger.DotNetCliInventoryFailed(ex, "--list-runtimes");
         }
 
         return (sdks, runtimes);
@@ -360,11 +382,12 @@ public sealed class DotNetPackageService : IDotNetPackageService
                 if (TryReadAnyCache(cacheFile, out var stale))
                 {
                     raw = stale;
+                    _logger.DotNetChannelDetailFallbackToCache(ex, channel);
                 }
             }
         }
 
-        return raw is not null ? ParseChannelDetail(raw, channel) : null;
+        return raw is not null ? ParseChannelDetail(raw, channel, _logger) : null;
     }
 
     private static DotNetChannelInfo BuildChannelInfo(
@@ -574,7 +597,7 @@ public sealed class DotNetPackageService : IDotNetPackageService
         return plans;
     }
 
-    private static IReadOnlyList<IndexChannelEntry> ParseReleasesIndex(string raw)
+    private static IReadOnlyList<IndexChannelEntry> ParseReleasesIndex(string raw, ILogger logger)
     {
         try
         {
@@ -606,13 +629,14 @@ public sealed class DotNetPackageService : IDotNetPackageService
 
             return list;
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            logger.DotNetMetadataJsonInvalid(ex, "releases-index.json");
             return [];
         }
     }
 
-    private static ChannelReleaseDetail? ParseChannelDetail(string raw, string expectedChannel)
+    private static ChannelReleaseDetail? ParseChannelDetail(string raw, string expectedChannel, ILogger logger)
     {
         try
         {
@@ -675,8 +699,9 @@ public sealed class DotNetPackageService : IDotNetPackageService
                 aspRuntimes,
                 runtimes);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            logger.DotNetMetadataJsonInvalid(ex, expectedChannel);
             return null;
         }
     }

@@ -1,12 +1,17 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace AIUpdater.Services;
 
-public sealed class UpdaterOutputParser
+public sealed class UpdaterOutputParser(ILogger<UpdaterOutputParser>? logger = null)
 {
+    private readonly ILogger _logger = logger ?? NullLogger<UpdaterOutputParser>.Instance;
+
     public static string BuildCheckSummary(IEnumerable<UpdateStage> stages)
     {
         var selected = stages.ToArray();
@@ -173,11 +178,13 @@ public sealed class UpdaterOutputParser
 
                 stage.SetCheckResult(result.Result, result.Installed, result.Available, info: result.Info);
                 run.ResultStages.Add(stage.Id);
+                _logger.StageCheckResultParsed(run.Vendor, stage.Id, result.Result, result.Installed, result.Available);
             }
             catch (JsonException exception)
             {
                 run.SawError = true;
                 run.ActiveStage?.SetFailed();
+                _logger.StageCheckResultMalformed(exception, run.Vendor);
                 logLine?.Invoke($"Не удалось прочитать результат проверки: {exception.Message}", run.Vendor);
             }
 
@@ -188,7 +195,7 @@ public sealed class UpdaterOutputParser
         UpdateStageFromLine(trimmed, isError, run, operationState, vendorStatus);
     }
 
-    private static void UpdateStageFromLine(
+    private void UpdateStageFromLine(
         string line,
         bool isError,
         VendorRun run,
@@ -204,6 +211,7 @@ public sealed class UpdaterOutputParser
             {
                 finishedStage?.SetFailed();
                 run.SawError = true;
+                _logger.StageReportedFailureMarker(run.Vendor, result.Groups["stage"].Value);
             }
             else if (finishedStage?.OperationState != OperationState.Failed)
             {

@@ -4,6 +4,8 @@ using CommunityToolkit.Mvvm.Input;
 using KeepShell.Bootstrap;
 using KeepShell.ViewModels;
 using MahApps.Metro.IconPacks;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AIUpdater.ViewModels;
 
@@ -11,11 +13,17 @@ public sealed class SettingsViewModel : ObservableObject, IPageHeader
 {
     public const string AppearanceKey = "appearance";
     public const string TranslationKey = "translation";
+    private readonly ILogger _logger;
 
-    public SettingsViewModel(ShellPreferences preferences, TranslationAgentViewModel agent, ISettingsStore settings)
+    public SettingsViewModel(
+        ShellPreferences preferences,
+        TranslationAgentViewModel agent,
+        ISettingsStore settings,
+        ILogger<SettingsViewModel>? logger = null)
     {
         Preferences = preferences;
         Agent = agent;
+        _logger = logger ?? NullLogger<SettingsViewModel>.Instance;
         Sections = new(new(AppearanceKey, "Внешний вид", PackIconLucideKind.Palette, "масштаб шрифт навигация"),
             new(TranslationKey, "Перевод", PackIconLucideKind.Languages, "агент модель CLI рассуждения"));
         Sections.Restore(settings.GetStringValue(SettingsKeys.SettingsSection));
@@ -29,6 +37,7 @@ public sealed class SettingsViewModel : ObservableObject, IPageHeader
             Preferences.FontScale = FontScaleManager.DefaultScale;
             Preferences.ShowPageHeader = true;
             Preferences.NavCollapsed = false;
+            _logger.AppearanceResetToDefaults();
         });
     }
 

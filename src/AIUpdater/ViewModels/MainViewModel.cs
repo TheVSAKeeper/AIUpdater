@@ -1,8 +1,11 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
 using AIUpdater.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Collections.ObjectModel;
 
 namespace AIUpdater.ViewModels;
@@ -13,6 +16,7 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
 {
     private readonly IUpdaterExecutionService _executionService;
     private readonly IUpdaterDialogs _dialogService;
+    private readonly ILogger _logger;
     private CancellationTokenSource? _runCancellation;
     private UpdateStage[] _runStages = [];
     private string _action = "Update";
@@ -21,11 +25,16 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
     private TaskCompletionSource? _runCompletion;
 
     [ActivatorUtilitiesConstructor]
-    public MainViewModel(IUpdaterExecutionService executionService, IUpdaterDialogs dialogService)
+    public MainViewModel(
+        IUpdaterExecutionService executionService,
+        IUpdaterDialogs dialogService,
+        ILogger<MainViewModel>? logger = null,
+        ILogger<LogPanelViewModel>? logPanelLogger = null)
     {
         _executionService = executionService;
         _dialogService = dialogService;
-        LogPanel = new LogPanelViewModel(Vendors, _executionService, _dialogService);
+        _logger = logger ?? NullLogger<MainViewModel>.Instance;
+        LogPanel = new LogPanelViewModel(Vendors, _executionService, _dialogService, logPanelLogger);
 
         CheckAllCommand = new AsyncRelayCommand(() => RunUpdaterAsync(null), () => CanStartRun);
         UpdateSelectedCommand = new AsyncRelayCommand(UpdateSelectedStagesAsync, () => CanUpdateSelected);
@@ -228,6 +237,7 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
 
         if (!_executionService.ScriptExists())
         {
+            _logger.UpdaterScriptMissing(ScriptPath);
             _dialogService.ShowMessage($"Скрипт не найден:\n{ScriptPath}", "AI Updater");
             return;
         }
@@ -250,6 +260,7 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
         }
         catch (Exception exception)
         {
+            _logger.UpdaterUnhandledRunException(exception, _action);
             AppendLine(exception.ToString());
             sawError = true;
         }
@@ -275,6 +286,7 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
 
         if (!_executionService.ScriptExists())
         {
+            _logger.UpdaterScriptMissing(ScriptPath);
             _dialogService.ShowMessage($"Скрипт не найден:\n{ScriptPath}", "AI Updater");
             return false;
         }
@@ -299,6 +311,7 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
         }
         catch (Exception exception)
         {
+            _logger.UpdaterUnhandledRunException(exception, _action);
             AppendLine(exception.ToString());
             sawError = true;
         }
@@ -346,6 +359,7 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
         var selected = Stages.Where(stage => stage.CanSelectForUpdate && stage.IsSelectedForUpdate).ToArray();
         if (selected.Length > 0)
         {
+            _logger.BulkUpdateRequested(selected.Length);
             await RunUpdaterAsync(null, checkOnly: false, selected: selected);
         }
     }
@@ -365,9 +379,11 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
 
         if (action == "Uninstall" && !await _dialogService.ConfirmAsync($"Удалить {stage.Name}?", "Удаление компонента", "Удалить"))
         {
+            _logger.ComponentUninstallCancelled(stage.Id);
             return;
         }
 
+        _logger.ComponentActionRequested(stage.Id, action);
         await RunUpdaterAsync(stage, action);
     }
 
@@ -379,6 +395,7 @@ public sealed class MainViewModel : ObservableObject, IPageHeader, IPageStatus, 
         }
 
         _stopRequested = true;
+        _logger.UpdaterStopRequested(ActiveCount, QueuedCount);
         try
         {
             _runCancellation?.Cancel();

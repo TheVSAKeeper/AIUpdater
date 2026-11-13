@@ -1,9 +1,12 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
 using AIUpdater.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KeepShell.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Text.RegularExpressions;
@@ -471,17 +474,23 @@ public sealed class DotNetViewModel : ObservableObject, IDisposable, IPageHeader
     private readonly MainViewModel _updates;
     private readonly IDotNetPackageService _packageService;
     private readonly IUpdaterDialogs _dialogs;
+    private readonly ILogger _logger;
     private DotNetCatalogSnapshot? _snapshot;
     private DotNetOperationRequest? _activeOperation;
     private CancellationTokenSource? _loadCts;
     private bool _hasLoaded;
 
     [ActivatorUtilitiesConstructor]
-    public DotNetViewModel(MainViewModel updates, IDotNetPackageService packageService, IUpdaterDialogs dialogs)
+    public DotNetViewModel(
+        MainViewModel updates,
+        IDotNetPackageService packageService,
+        IUpdaterDialogs dialogs,
+        ILogger<DotNetViewModel>? logger = null)
     {
         _updates = updates;
         _packageService = packageService;
         _dialogs = dialogs;
+        _logger = logger ?? NullLogger<DotNetViewModel>.Instance;
 
         RefreshCommand = new AsyncRelayCommand(() => LoadCatalogAsync(forceRefresh: true), () => CanInteract);
         EnsureLoadedCommand = new AsyncRelayCommand(EnsureLoadedAsync);
@@ -645,6 +654,7 @@ public sealed class DotNetViewModel : ObservableObject, IDisposable, IPageHeader
         }
         catch (Exception ex)
         {
+            _logger.DotNetCatalogViewModelFailed(ex);
             WarningMessage = $"Не удалось обновить каталог .NET: {ex.Message}";
             SummaryText = "Ошибка загрузки каталога .NET";
         }
@@ -698,6 +708,7 @@ public sealed class DotNetViewModel : ObservableObject, IDisposable, IPageHeader
 
         if (!instance.CanUninstall)
         {
+            _logger.DotNetUninstallBlockedByOwner(kind, instance.Version, instance.Owner);
             _dialogs.ShowMessage(instance.OwnerDescription, "Удаление недоступно");
             return;
         }
@@ -712,6 +723,8 @@ public sealed class DotNetViewModel : ObservableObject, IDisposable, IPageHeader
         {
             return;
         }
+
+        _logger.DotNetUninstallConfirmed(kind, instance.Version, channel);
 
         await ExecuteOperationAsync(new DotNetOperationRequest(
             DotNetActionKind.Uninstall,

@@ -1,6 +1,10 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
 using AIUpdater.Services.Parsers;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
@@ -12,10 +16,12 @@ public sealed class ChangelogService(
     IChangelogContentFetcher fetcher,
     IEnumerable<IChangelogFormatParser> parsers,
     IChangelogRepository repository,
-    IChangelogTranslator translator) : IChangelogService
+    IChangelogTranslator translator,
+    ILogger<ChangelogService>? logger = null) : IChangelogService
 {
     private readonly IChangelogContentFetcher _fetcher = fetcher;
     private readonly IReadOnlyList<IChangelogFormatParser> _parsers = parsers.ToList();
+    private readonly ILogger _logger = logger ?? NullLogger<ChangelogService>.Instance;
 
     public ChangelogService()
         : this(
@@ -83,9 +89,11 @@ public sealed class ChangelogService(
                 Repository.Save(cached);
             }
 
+            _logger.ChangelogServedFromFreshCache(stage.Id, cached.Releases.Count);
             return (cached, true);
         }
 
+        var startedAt = Stopwatch.GetTimestamp();
         try
         {
             var etagToUse = forceRefresh ? null : cached?.ETag;
@@ -96,6 +104,7 @@ public sealed class ChangelogService(
                 await EnrichCompareReleasesAsync(cached.Releases, cancellationToken);
                 cached.UpdatedAt = DateTimeOffset.UtcNow;
                 Repository.Save(cached);
+                _logger.ChangelogDocumentUpdated(stage.Id, source.Format, cached.Releases.Count, true, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
                 return (cached, true);
             }
 
@@ -125,6 +134,7 @@ public sealed class ChangelogService(
             };
 
             Repository.Save(document);
+            _logger.ChangelogDocumentUpdated(stage.Id, source.Format, merged.Count, false, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
             return (document, false);
         }
         catch (Exception exception) when (cached is not null && exception is HttpRequestException or InvalidDataException or JsonException or TaskCanceledException)
@@ -134,6 +144,7 @@ public sealed class ChangelogService(
                 throw;
             }
 
+            _logger.ChangelogFallbackToCachedDocument(exception, stage.Id, cached.Releases.Count);
             return (cached, true);
         }
     }
@@ -241,6 +252,7 @@ public sealed class ChangelogService(
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested
                                           && exception is HttpRequestException or InvalidDataException or JsonException or TaskCanceledException)
         {
+            _logger.AntigravityCliGitHubFallbackToLocal(exception);
         }
 
         var localSource = new ChangelogSource(source.PageUrl, "local://agy-changelog", "agy", source.Note);
@@ -496,6 +508,7 @@ public sealed class ChangelogService(
                     throw;
                 }
 
+                _logger.CompareCommitsEnrichmentStopped(exception, release.Version);
                 break;
             }
         }
@@ -599,6 +612,7 @@ public sealed class ChangelogService(
         }
         catch (Exception exception) when (exception is InvalidDataException or JsonException or Win32Exception or OperationCanceledException)
         {
+            _logger.PluginListFetchFailed(exception, cliName);
         }
 
         if (releases.Count == 0)

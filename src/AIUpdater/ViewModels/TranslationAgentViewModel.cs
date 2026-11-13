@@ -1,7 +1,10 @@
-﻿using AIUpdater.Services;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KeepShell.Agents;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AIUpdater.ViewModels;
 
@@ -13,13 +16,15 @@ public sealed record TranslationAgentOption(string Id, string Name)
 public sealed class TranslationAgentViewModel : ObservableObject
 {
     private readonly TranslationAgentSettings _settings;
+    private readonly ILogger _logger;
     private Dictionary<string, TranslationAgentProfile> _profiles = new();
     private string _backendId = "";
     private int _profileGeneration;
 
-    public TranslationAgentViewModel(TranslationAgentSettings settings)
+    public TranslationAgentViewModel(TranslationAgentSettings settings, ILogger<TranslationAgentViewModel>? logger = null)
     {
         _settings = settings;
+        _logger = logger ?? NullLogger<TranslationAgentViewModel>.Instance;
         Backends = AgentBackendFactory.Ids.Select(id =>
         {
             var backend = AgentBackendFactory.Create(id);
@@ -141,6 +146,7 @@ public sealed class TranslationAgentViewModel : ObservableObject
         var path = ExecutablePath.Trim();
         if (path.Length > 0 && !System.IO.File.Exists(path))
         {
+            _logger.AgentCliNotFound(BackendId, path);
             Status = "Файл не найден. Проверьте путь или выберите программу через «Обзор…».";
             return;
         }
@@ -154,6 +160,7 @@ public sealed class TranslationAgentViewModel : ObservableObject
             if (!IsCurrent()) return;
             if (path.Length > 0 && cli is not null && !string.Equals(System.IO.Path.GetFullPath(path), System.IO.Path.GetFullPath(cli.ExecutablePath), StringComparison.OrdinalIgnoreCase))
             {
+                _logger.AgentCliNotFound(BackendId, path);
                 Status = $"Указанный файл не распознан как CLI {backend.DisplayName}. Выберите программу этого агента.";
                 return;
             }
@@ -164,12 +171,21 @@ public sealed class TranslationAgentViewModel : ObservableObject
                 Models = models.Select(option => option.Id).Concat(string.IsNullOrWhiteSpace(model) ? [] : new[] { model }).Distinct().ToArray();
             Model = model;
             DetectedPath = cli?.ExecutablePath ?? "";
-            Status = cli is null ? "CLI не найден. Установите агент или укажите путь к программе."
-                : $"Найден {backend.DisplayName} {cli.Version}." + (models.Count == 0 ? " Каталог моделей недоступен, ID можно ввести вручную." : "");
+            if (cli is null)
+            {
+                _logger.AgentCliNotFound(BackendId, path.Length > 0 ? path : "PATH");
+                Status = "CLI не найден. Установите агент или укажите путь к программе.";
+            }
+            else
+            {
+                _logger.AgentCliDetected(BackendId, cli.Version, cli.ExecutablePath, models.Count);
+                Status = $"Найден {backend.DisplayName} {cli.Version}." + (models.Count == 0 ? " Каталог моделей недоступен, ID можно ввести вручную." : "");
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception exception) when (exception is System.IO.IOException or System.ComponentModel.Win32Exception or ArgumentException)
         {
+            _logger.AgentCliDetectFailed(exception, BackendId);
             if (IsCurrent()) Status = exception.Message;
         }
         finally { (backend as IDisposable)?.Dispose(); }

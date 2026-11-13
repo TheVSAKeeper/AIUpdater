@@ -1,4 +1,7 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.IO;
 using System.Net.Http;
 using System.Text;
@@ -27,6 +30,7 @@ public sealed record ChangelogCardData(
 public sealed class ChangelogPresentationState : IDisposable
 {
     private readonly DispatcherTimer _translationTimer;
+    private readonly ILogger _logger;
     private CancellationTokenSource? _loadCancellation;
     private CancellationTokenSource? _translationCancellation;
     private string? _translatingReleaseKey;
@@ -35,8 +39,9 @@ public sealed class ChangelogPresentationState : IDisposable
     private int _translatingItemCount;
     private DateTimeOffset _translationStartedAt;
 
-    public ChangelogPresentationState(Action onTimerTick)
+    public ChangelogPresentationState(Action onTimerTick, ILogger? logger = null)
     {
+        _logger = logger ?? NullLogger.Instance;
         _translationTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _translationTimer.Tick += (_, _) => onTimerTick();
     }
@@ -234,6 +239,7 @@ public sealed class ChangelogPresentationState : IDisposable
                 return;
             }
 
+            _logger.ChangelogStageLoadFailed(exception, stage.Id);
             if (CurrentDocument is not null)
             {
                 onStatus("Показан сохранённый журнал (источник сейчас недоступен).");

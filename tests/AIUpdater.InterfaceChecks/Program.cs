@@ -1,8 +1,10 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
 using AIUpdater.Services;
 using AIUpdater.ViewModels;
 using AIUpdater.Views;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using System.IO;
 using System.Windows;
 using System.Windows.Automation.Peers;
@@ -741,16 +743,20 @@ internal static partial class Program
             services =>
             {
                 services.AddSingleton<IChangelogContentFetcher>(stubFetcher);
-                services.AddSingleton<IDotNetPackageService>(new DotNetPackageService(
+                services.AddSingleton<IDotNetPackageService>(sp => new DotNetPackageService(
                     stubFetcher,
                     appPaths,
                     () => [new DotNetStandaloneBundle(DotNetPackageKind.Sdk, "10.0.102", "Microsoft .NET SDK 10.0.102 (x64)")],
-                    () => @"C:\Program Files\dotnet\dotnet.exe"));
+                    () => @"C:\Program Files\dotnet\dotnet.exe",
+                    sp.GetRequiredService<ILogger<DotNetPackageService>>()));
             });
         var window = provider.GetRequiredService<MainWindow>();
         var shell = window.ViewModel;
         var viewModel = shell.Updates;
         using var visualHost = KeepShell.Testing.VisualTestHost.Show(window, 1200, 800);
+        provider.GetRequiredService<KeepShell.Diagnostics.PerformanceMonitor>().ReportStartup(TimeSpan.FromMilliseconds(350));
+        provider.GetRequiredService<KeepShell.Diagnostics.DiagnosticsCollector>().CaptureMachine(window);
+        provider.GetRequiredService<ILogger<App>>().AppStarted(350);
         visualHost.Settle();
         if (args.Skip(1).Contains("--cached-ui"))
         {

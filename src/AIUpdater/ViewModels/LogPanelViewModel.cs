@@ -1,7 +1,10 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
 using AIUpdater.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Collections.ObjectModel;
 
 namespace AIUpdater.ViewModels;
@@ -12,15 +15,18 @@ public sealed class LogPanelViewModel : ObservableObject, KeepShell.ViewModels.I
     public string PageDescription => "Последняя операция и история по поставщикам";
     private readonly IUpdaterExecutionService _executionService;
     private readonly IUpdaterDialogs _dialogService;
+    private readonly ILogger _logger;
 
     public LogPanelViewModel(
         ObservableCollection<VendorStatus> vendors,
         IUpdaterExecutionService executionService,
-        IUpdaterDialogs dialogService)
+        IUpdaterDialogs dialogService,
+        ILogger<LogPanelViewModel>? logger = null)
     {
         Vendors = vendors;
         _executionService = executionService;
         _dialogService = dialogService;
+        _logger = logger ?? NullLogger<LogPanelViewModel>.Instance;
         LogFolderToolTip = $"Скрипт: {_executionService.ScriptPath}\nЖурналы: {_executionService.LogDirectory}";
 
         OpenLogCommand = new RelayCommand<object>(OpenSelectedLog);
@@ -84,10 +90,12 @@ public sealed class LogPanelViewModel : ObservableObject, KeepShell.ViewModels.I
         var selectedPath = vendor?.LogPath ?? _executionService.LogPath;
         if (!_executionService.LogFileExists(selectedPath))
         {
+            _logger.ExternalLogMissing(selectedPath);
             _dialogService.ShowMessage("Лог последнего запуска ещё не создан.", "AI Updater");
             return;
         }
 
+        _logger.ExternalLogOpened(selectedPath);
         _dialogService.OpenExternal(selectedPath);
     }
 
@@ -95,6 +103,7 @@ public sealed class LogPanelViewModel : ObservableObject, KeepShell.ViewModels.I
     {
         if (!string.IsNullOrEmpty(_executionService.LogDirectory))
         {
+            _logger.ExternalLogOpened(_executionService.LogDirectory);
             _dialogService.OpenExternal(_executionService.LogDirectory);
         }
     }

@@ -1,5 +1,8 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
 using AIUpdater.Services.Parsers;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -7,10 +10,11 @@ using System.Text.RegularExpressions;
 
 namespace AIUpdater.Services;
 
-public sealed class FileChangelogRepository(string? cacheDirectory = null) : IChangelogRepository
+public sealed class FileChangelogRepository(string? cacheDirectory = null, ILogger<FileChangelogRepository>? logger = null) : IChangelogRepository
 {
     private static readonly object SaveGate = new();
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private readonly ILogger _logger = logger ?? NullLogger<FileChangelogRepository>.Instance;
 
     public string CacheDirectory { get; set; } = cacheDirectory ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -30,14 +34,17 @@ public sealed class FileChangelogRepository(string? cacheDirectory = null) : ICh
             var doc = JsonSerializer.Deserialize<ChangelogDocument>(File.ReadAllText(path, Encoding.UTF8));
             if (doc is null || doc.SchemaVersion is < 7 or > ChangelogDocument.CurrentSchemaVersion || doc.Releases.Count == 0)
             {
+                _logger.ChangelogCacheIncompatibleOrEmpty(stageId, doc?.SchemaVersion ?? 0, doc?.Releases.Count ?? 0);
                 return null;
             }
 
             ChangelogFormatter.EnsureSummaries(doc.Releases);
+            _logger.ChangelogCacheLoaded(stageId, doc.Releases.Count, doc.SchemaVersion);
             return doc;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
+            _logger.ChangelogCacheReadFailed(exception, path);
             return null;
         }
     }
@@ -69,9 +76,11 @@ public sealed class FileChangelogRepository(string? cacheDirectory = null) : ICh
                 File.Move(temp, path, true);
             }
             finally { if (File.Exists(temp)) File.Delete(temp); }
+            _logger.ChangelogCacheSaved(document.StageId, document.Releases.Count);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            _logger.ChangelogCacheWriteFailed(exception, document.StageId, CacheDirectory);
         }
     }
 

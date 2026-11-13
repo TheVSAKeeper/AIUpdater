@@ -6,15 +6,23 @@ using AIUpdater.Views;
 using KeepShell.Automation;
 using KeepShell.Bootstrap;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
 
 namespace AIUpdater.Automation;
 
-internal sealed class GalleryHost(MainWindow window, IReadOnlyList<string> pages) : IGalleryHost
+internal sealed class GalleryHost(
+    MainWindow window,
+    IReadOnlyList<string> pages,
+    ILogger<App> appLogger,
+    ILogger<FileStageResultStore> resultStoreLogger,
+    ILogger<DotNetPackageService> dotNetLogger,
+    AppPaths paths) : IGalleryHost
 {
-    private static readonly string[] PageKeys = [SectionKey.Updates, SectionKey.DotNet, SectionKey.Changelog, SectionKey.Logs, SectionKey.Settings, "appearance", "confirmation"];
+    private static readonly string[] PageKeys = [SectionKey.Updates, SectionKey.DotNet, SectionKey.Changelog, SectionKey.Logs, SectionKey.AppLogs, SectionKey.Diagnostics, SectionKey.Settings, "appearance", "confirmation"];
     private readonly ShellViewModel _shell = window.ViewModel;
     public string AppName => "AI Updater";
     public string AppVersion => _shell.AppVersion;
@@ -23,6 +31,7 @@ internal sealed class GalleryHost(MainWindow window, IReadOnlyList<string> pages
 
     internal static async Task<int> RunAsync(IEnumerable<string> args)
     {
+        var startedAt = Stopwatch.GetTimestamp();
         var arguments = GalleryArguments.Parse(args, new GalleryDefaults
         {
             Directory = Path.Combine(Environment.CurrentDirectory, "artifacts", "gallery"),
@@ -41,7 +50,7 @@ internal sealed class GalleryHost(MainWindow window, IReadOnlyList<string> pages
             settings.SetDouble(SettingsKeys.FontScale, arguments.FontScale);
             AppThemes.Initialize(settings);
             if (arguments.Themes.Any(key => ThemeManager.Find(key) is null)) throw new ArgumentException("Указана незарегистрированная тема галереи.");
-            using var logging = KeepShellLogging.Bootstrap(new() { LogsDirectory = paths.LogsDirectory, WriteToDebug = false });
+            using var logging = KeepShellLogging.Bootstrap(new() { LogsDirectory = paths.LogsDirectory, FileNamePrefix = "app-", WriteToDebug = false });
             var backend = new GalleryBackend();
             using var services = App.ConfigureServices(settings, logging, paths, collection =>
             {
@@ -50,15 +59,27 @@ internal sealed class GalleryHost(MainWindow window, IReadOnlyList<string> pages
                 collection.AddSingleton<IDotNetPackageService>(backend);
                 collection.AddSingleton<IChangelogTranslator, GalleryTranslator>();
             });
-            var host = new GalleryHost(services.GetRequiredService<MainWindow>(), arguments.Pages);
+            var galleryLogger = services.GetRequiredService<ILogger<GalleryHost>>();
+            galleryLogger.GalleryStarted(arguments.Directory, arguments.Pages.Count, arguments.FontScale);
+            var mainWindow = services.GetRequiredService<MainWindow>();
+            var host = new GalleryHost(
+                mainWindow,
+                arguments.Pages,
+                services.GetRequiredService<ILogger<App>>(),
+                services.GetRequiredService<ILogger<FileStageResultStore>>(),
+                services.GetRequiredService<ILogger<DotNetPackageService>>(),
+                paths);
+            services.GetRequiredService<KeepShell.Diagnostics.PerformanceMonitor>().ReportStartup(TimeSpan.FromMilliseconds(420));
+            services.GetRequiredService<KeepShell.Diagnostics.DiagnosticsCollector>().CaptureMachine(mainWindow);
             var exitCode = await GalleryRunner.RunAsync(host, arguments);
+            galleryLogger.GalleryCompleted(exitCode, (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
             settings.Close();
             return exitCode;
         }
         finally { settings.Close(); }
     }
 
-    public Task ArrangeAsync()
+    public async Task ArrangeAsync()
     {
         foreach (var stage in _shell.Updates.Stages) stage.SetCheckResult("CURRENT", "1.0.0");
         _shell.Updates.Stages.Single(stage => stage.Id == "Claude Code").SetCheckResult("AVAILABLE", "2.0.0", "2.1.0");
@@ -78,7 +99,10 @@ internal sealed class GalleryHost(MainWindow window, IReadOnlyList<string> pages
             }],
         }, selected);
         _shell.DotNet.ArrangeCatalog(GalleryBackend.CreateCatalogSnapshot());
-        return Task.CompletedTask;
+        resultStoreLogger.StageResultsLoaded(_shell.Updates.Stages.Count, paths.ResultsFile);
+        dotNetLogger.DotNetCatalogLoaded(4, 2, 3, 1, false, 185);
+        appLogger.AppStarted(420);
+        await Task.Delay(260);
     }
 
     public async Task<GalleryShot> CaptureAsync(GalleryCase item, GalleryContext context)
@@ -108,8 +132,10 @@ internal sealed class GalleryHost(MainWindow window, IReadOnlyList<string> pages
     private sealed class GalleryBackend : IChangelogContentFetcher, IUpdaterProcessRunner, IDotNetPackageService
     {
         private const string Notes = "## 2.1.0\n\n### Changed\n- Improved CLI startup";
-        public Task<string> FetchAsync(ChangelogSource source, CancellationToken cancellationToken) => Task.FromResult(Notes);
-        public Task<(string Content, string? ETag, bool NotModified)> FetchWithETagAsync(ChangelogSource source, string? cachedETag, CancellationToken cancellationToken) => Task.FromResult((Notes, (string?)null, false));
+        private const string CodexNotes = "<li data-codex-topics=\"codex-app\"><time>2026-11-11</time><h3>Codex app 2.1.0</h3><article><h3>Changed</h3><ul><li>Improved CLI startup</li></ul></article></li>";
+        private static string GetNotes(ChangelogSource source) => string.Equals(source.Format, "codex-app", StringComparison.OrdinalIgnoreCase) ? CodexNotes : Notes;
+        public Task<string> FetchAsync(ChangelogSource source, CancellationToken cancellationToken) => Task.FromResult(GetNotes(source));
+        public Task<(string Content, string? ETag, bool NotModified)> FetchWithETagAsync(ChangelogSource source, string? cachedETag, CancellationToken cancellationToken) => Task.FromResult((GetNotes(source), (string?)null, false));
         public Task<string> DownloadUrlAsync(string url, CancellationToken cancellationToken) => Task.FromResult(Notes);
         public Task<string> RunCommandAsync(string executable, IReadOnlyList<string> arguments, int timeoutSeconds, CancellationToken cancellationToken) => Task.FromResult("");
         public string? FindAgyExecutable() => null;

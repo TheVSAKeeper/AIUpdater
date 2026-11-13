@@ -1,8 +1,11 @@
-﻿using AIUpdater.Models;
+﻿using AIUpdater.Bootstrap;
+using AIUpdater.Models;
 using AIUpdater.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows.Data;
@@ -14,14 +17,19 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable, KeepShel
     public const double DefaultFontSize = 14;
     private readonly IChangelogService _changelogService;
     private readonly IUpdaterDialogs? _dialogService;
+    private readonly ILogger _logger;
     private readonly UpdateStage[] _allStages;
     private readonly CollectionViewSource? _stagesViewSource;
     private readonly ChangelogPresentationState _state;
     private bool _suppressTextSync;
 
     [ActivatorUtilitiesConstructor]
-    public ChangelogViewModel(MainViewModel updates, IChangelogService changelogService, IUpdaterDialogs dialogService)
-        : this(updates.Stages, null, changelogService, dialogService)
+    public ChangelogViewModel(
+        MainViewModel updates,
+        IChangelogService changelogService,
+        IUpdaterDialogs dialogService,
+        ILogger<ChangelogViewModel>? logger = null)
+        : this(updates.Stages, null, changelogService, dialogService, logger)
     {
     }
 
@@ -29,13 +37,15 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable, KeepShel
         IEnumerable<UpdateStage> stages,
         UpdateStage? selected = null,
         IChangelogService? changelogService = null,
-        IUpdaterDialogs? dialogService = null)
+        IUpdaterDialogs? dialogService = null,
+        ILogger<ChangelogViewModel>? logger = null)
     {
+        _logger = logger ?? NullLogger<ChangelogViewModel>.Instance;
         _changelogService = changelogService ?? new ChangelogService();
         _dialogService = dialogService;
         _changelogService.Translator.Settings.Changed += OnAgentChanged;
         _allStages = stages.ToArray();
-        _state = new ChangelogPresentationState(UpdateTranslationBannerLiveText);
+        _state = new ChangelogPresentationState(UpdateTranslationBannerLiveText, _logger);
 
         ToggleChannelCommand = new RelayCommand(ToggleChannel);
         ToggleLanguageCommand = new RelayCommand(ToggleLanguage);
@@ -291,6 +301,7 @@ public sealed class ChangelogViewModel : ObservableObject, IDisposable, KeepShel
             RenderDocument(_state.CurrentDocument, _state.CurrentStage);
             var visibleCount = ChangelogFormatter.FilterReleasesByChannel(_state.CurrentDocument.Releases, _state.SelectedChannel).Count;
             LoadStatusText = $"Показано выпусков: {visibleCount}";
+            _logger.ChangelogChannelSwitched(_state.CurrentStage?.Id, channel, visibleCount);
             ScrollToHomeRequested?.Invoke();
         }
     }
