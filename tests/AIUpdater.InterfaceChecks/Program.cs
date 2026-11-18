@@ -6,6 +6,7 @@ using AIUpdater.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.IO;
+using System.Text;
 using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
@@ -898,7 +899,7 @@ internal static partial class Program
                                    $json = @{ Stage = $OnlyStage; Result = $result; Installed = '2.2.1'; Available = '2.2.1' } | ConvertTo-Json -Compress
                                    Write-Output "[12:34:56] UI_RESULT $json"
                                    Write-Output "[12:34:56] === COMPLETED: $OnlyStage ==="
-                                   """);
+                                   """, Encoding.UTF8);
 
         viewModel.ConfigurePaths(scriptPath: fixture, logPath: Path.Combine(output, "main.log"));
         foreach (var vendor in viewModel.Vendors)
@@ -971,7 +972,8 @@ internal static partial class Program
         var liveStatusBar = Descendants<StatusBarView>(window).Single();
         var liveStatusBarText = ((TextBlock)liveStatusBar.FindName("OperationStatusText")).Text;
         Check(!liveBar.IsIndeterminate && Math.Abs(liveBar.Value - 42d) < 0.01, "Determinate .NET download progress bar did not update to 42%");
-        Check(livePercent.Text == "42%" && liveDetail.Text.Contains("91.4 / 217.6 МБ"), "Top .NET busy panel did not show percentage and downloaded MB");
+        Check(livePercent.Text == "42%" && liveDetail.Text.Contains("91.4 / 217.6 МБ"),
+            $"Top .NET busy panel did not show percentage and downloaded MB: percent='{livePercent.Text}', detail='{liveDetail.Text}'");
         Check(((TextBlock)liveNet11RowView.FindName("StatusTextBlock")).Text == "Установка · 42%"
               && ((TextBlock)liveNet11RowView.FindName("OperationDetailText")).Text.Contains("91.4 / 217.6 МБ"),
             "Active .NET package row did not show live download progress");
