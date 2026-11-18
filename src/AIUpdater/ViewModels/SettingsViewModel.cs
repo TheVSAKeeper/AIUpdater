@@ -24,7 +24,7 @@ public sealed class SettingsViewModel : ObservableObject, IPageHeader
         Preferences = preferences;
         Agent = agent;
         _logger = logger ?? NullLogger<SettingsViewModel>.Instance;
-        Sections = new(new(AppearanceKey, "Внешний вид", PackIconLucideKind.Palette, "масштаб шрифт навигация"),
+        Sections = new(new(AppearanceKey, "Внешний вид", PackIconLucideKind.Palette, "масштаб шрифт навигация обновления плитки"),
             new(TranslationKey, "Перевод", PackIconLucideKind.Languages, "агент модель CLI рассуждения"));
         Sections.Restore(settings.GetStringValue(SettingsKeys.SettingsSection));
         Sections.PropertyChanged += (_, e) =>
@@ -37,6 +37,7 @@ public sealed class SettingsViewModel : ObservableObject, IPageHeader
             Preferences.FontScale = FontScaleManager.DefaultScale;
             Preferences.ShowPageHeader = true;
             Preferences.NavCollapsed = false;
+            Preferences.UseUpdateTiles = false;
             _logger.AppearanceResetToDefaults();
         });
     }

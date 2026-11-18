@@ -38,12 +38,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable, IPageHeader, 
         ISettingsStore? settings = null,
         IChangelogService? changelogService = null,
         ILogger<MainViewModel>? logger = null,
-        ILogger<LogPanelViewModel>? logPanelLogger = null)
+        ILogger<LogPanelViewModel>? logPanelLogger = null,
+        ShellPreferences? preferences = null)
     {
         _executionService = executionService;
         _dialogService = dialogService;
         _settings = settings;
         _changelogService = changelogService;
+        Preferences = preferences;
         _logger = logger ?? NullLogger<MainViewModel>.Instance;
         LogPanel = new LogPanelViewModel(Vendors, _executionService, _dialogService, logPanelLogger);
 
@@ -120,6 +122,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable, IPageHeader, 
         RebuildDisplayGroups();
     }
 
+    public ShellPreferences? Preferences { get; }
     public ObservableCollection<VendorStatus> Vendors { get; } = [];
     public ObservableCollection<StageCardGroup> DisplayGroups { get; } = [];
     public ObservableCollection<UpdateStage> Stages { get; } = new(UpdateStage.CreateCatalog());
@@ -262,8 +265,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable, IPageHeader, 
             var updates = Stages.Count(stage => !stage.IsDisabled && stage.HasUpdate);
             var selected = Stages.Count(stage => stage.CanSelectForUpdate && stage.IsSelectedForUpdate);
             var disabled = Stages.Count(stage => stage.IsDisabled);
-            return $"Компонентов: {Stages.Count} · Обновлений: {updates} · Выбрано: {selected}"
-                   + (disabled > 0 ? $" · Отключено: {disabled}" : "");
+            return $"Компонентов:\u00a0{Stages.Count} · Обновлений:\u00a0{updates} · Выбрано:\u00a0{selected}"
+                   + (disabled > 0 ? $" · Отключено:\u00a0{disabled}" : "");
         }
     }
 

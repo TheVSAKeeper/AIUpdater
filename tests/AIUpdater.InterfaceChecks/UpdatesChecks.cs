@@ -5,6 +5,7 @@ using AIUpdater.ViewModels;
 using AIUpdater.Views;
 using KeepShell.Bootstrap;
 using KeepShell.Testing;
+using KeepShell.Views.Controls;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -109,6 +110,63 @@ internal static partial class Program
         Console.WriteLine("PASS: updates grouping, sorting, hide-uninstalled filter, manual component disable/enable, partial vendor dispatch and background changelog prefetch/translation");
     }
 
+    private static void CheckUpdateTiles(VisualTestHost host, MainWindow window, ShellViewModel shell, string output)
+    {
+        var updates = Descendants<UpdatesView>(window).Single();
+        var stage = shell.Updates.Stages.Single(stage => stage.Id == "Claude Code");
+        var selected = stage.IsSelectedForUpdate;
+
+        shell.Navigate(SectionKey.Settings);
+        shell.SettingsPage.Sections.Restore(SettingsViewModel.AppearanceKey);
+        host.Settle();
+        var toggle = (CheckBox)Descendants<SettingsView>(window).Single().FindName("UpdateTilesToggle");
+        Check(toggle.IsVisible && toggle.IsChecked == false, "The tile switch is missing or checked by default");
+        toggle.SetCurrentValue(ToggleButton.IsCheckedProperty, true);
+        shell.Navigate(SectionKey.Updates);
+        host.Settle();
+
+        var tiles = Descendants<StageCardView>(updates).ToArray();
+        Check(tiles.Length == shell.Updates.Stages.Count && stage.IsSelectedForUpdate == selected, "The tile layout changed the catalog or selection");
+        var tile = tiles.Single(card => ((StageCardViewModel)card.DataContext).Stage == stage);
+        var viewModel = (StageCardViewModel)tile.DataContext;
+        Check(((TextBlock)tile.FindName("AvailableVersionText")).Text == stage.AvailableVersion, "The tile did not show the available version");
+        var select = Descendants<Button>(tile).Single(button => button.Command == viewModel.SelectOrCheckCommand);
+        Click(select);
+        Check(stage.IsSelectedForUpdate != selected, "The tile title did not toggle the update selection");
+        Click(select);
+        var menuButton = (Button)tile.FindName("CardMenuButton");
+        Click(menuButton);
+        var menu = ((Border)tile.FindName("CardBorder")).ContextMenu;
+        Check(menu.IsOpen && ReferenceEquals(menu.DataContext, viewModel), "The tile menu did not target its component");
+        menu.IsOpen = false;
+
+        var scroll = (ScrollViewer)updates.FindName("ComponentsScroll");
+        scroll.ScrollToTop();
+        host.Settle();
+        var panel = Descendants<CardColumnsPanel>(updates).First(value => value.Children.Count > 1);
+        Check(panel.Children[1].TranslatePoint(new(), panel).X > 0 && scroll.ScrollableWidth <= 1, "Tiles did not form columns in the standard window");
+        Render((FrameworkElement)window.Content, Path.Combine(output, "updates-tiles-1200.png"), 1200, 800);
+
+        window.SetCurrentValue(FrameworkElement.WidthProperty, 1000d);
+        window.SetCurrentValue(FrameworkElement.HeightProperty, 700d);
+        shell.Preferences.FontScale = 1.6;
+        host.Settle();
+        Check(panel.Children[1].TranslatePoint(new(), panel).Y > 0 && scroll.ScrollableWidth <= 1, "Tiles did not reflow at the larger font scale");
+        Render((FrameworkElement)window.Content, Path.Combine(output, "updates-tiles-1000-160.png"), 1000, 700);
+
+        shell.Navigate(SectionKey.Settings);
+        host.Settle();
+        Check(toggle.IsChecked == true, "Navigation cleared the tile switch");
+        shell.SettingsPage.ResetAppearanceCommand.Execute(null);
+        Check(toggle.IsChecked == false, "Appearance reset did not clear the tile switch");
+        shell.Navigate(SectionKey.Updates);
+        window.SetCurrentValue(FrameworkElement.WidthProperty, 1200d);
+        window.SetCurrentValue(FrameworkElement.HeightProperty, 800d);
+        host.Settle();
+        Check(!Descendants<CardColumnsPanel>(updates).Any() && stage.IsSelectedForUpdate == selected, "Returning to the table lost the selection or kept the tile panel");
+        Console.WriteLine("PASS: dashboard tile switch, settings persistence and reset, selection and menu, adaptive layout at two font scales");
+    }
+
     private static void CheckIsolatedPersistenceDispatchAndPrefetch(string output)
     {
         var workDir = Path.Combine(output, "updates-prefetch-" + Guid.NewGuid().ToString("N"));
@@ -142,7 +200,7 @@ internal static partial class Program
 
                 ### Fixed
                 - Fixed older CLI session handling.
-                """, "\"claude-v210\""),
+                """.ReplaceLineEndings("\n"), "\"claude-v210\""),
             [agyUrl] = ("[]", "\"agy-v1\""),
             [dshUrl] = ("{}", "\"dsh-v1\""),
         });
@@ -155,6 +213,9 @@ internal static partial class Program
         var dialogs = new SilentUpdaterDialogs();
 
         ISettingsStore store1 = new SettingsStore(settingsPath);
+        var preferences = new ShellPreferences(store1);
+        Check(!preferences.UseUpdateTiles, "The table must be the default when the layout setting is absent");
+        preferences.UseUpdateTiles = true;
         using (var vm1 = new MainViewModel(execution, dialogs, store1, changelogService))
         {
             vm1.GroupMode = UpdateGroupMode.ByState;
@@ -168,6 +229,7 @@ internal static partial class Program
         ISettingsStore store2 = new SettingsStore(settingsPath);
         try
         {
+            Check(new ShellPreferences(store2).UseUpdateTiles, "The tile layout did not survive reopening settings.toml");
             using var vm = new MainViewModel(execution, dialogs, store2, changelogService);
             using var changelogVm = new ChangelogViewModel(vm, changelogService, dialogs);
             Check(vm.GroupMode == UpdateGroupMode.ByState

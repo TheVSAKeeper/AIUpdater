@@ -16,7 +16,8 @@
                         <TextBlock Text="Внешний вид" Style="{DynamicResource Form.SectionTitle}" />
                         <keepshell:FontScaleField Scale="{Binding Preferences.FontScale, Mode=TwoWay}" Margin="0,16,0,16" />
                         <CheckBox Content="Показывать заголовки страниц" IsChecked="{Binding Preferences.ShowPageHeader}" Margin="0,0,0,14" />
-                        <CheckBox Content="Сворачивать панель навигации" IsChecked="{Binding Preferences.NavCollapsed}" Margin="0,0,0,20" />
+                        <CheckBox Content="Сворачивать панель навигации" IsChecked="{Binding Preferences.NavCollapsed}" Margin="0,0,0,14" />
+                        <CheckBox x:Name="UpdateTilesToggle" Content="Показывать обновления плитками" IsChecked="{Binding Preferences.UseUpdateTiles}" Margin="0,0,0,20" />
                         <Button Content="Сбросить внешний вид" Command="{Binding ResetAppearanceCommand}" HorizontalAlignment="Left" />
                     </StackPanel>
                 </Border>

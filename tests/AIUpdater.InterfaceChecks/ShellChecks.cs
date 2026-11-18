@@ -141,6 +141,15 @@ internal static partial class Program
             host.Settle();
         }
         shell.Preferences.FontScale = 1;
+        shell.Preferences.UseUpdateTiles = true;
+        ((CheckBox)updates.FindName("ActiveOnlyToggle")).SetCurrentValue(ToggleButton.IsCheckedProperty, true);
+        host.Settle();
+        var runningTiles = Descendants<StageCardView>(updates).Where(card => card.IsVisible).ToArray();
+        Check(runningTiles.Length == 4
+              && runningTiles.All(card => ((TextBlock)card.FindName("OperationDetailText")).Text.Contains("37%"))
+              && Descendants<KeepShell.Views.Controls.CardColumnsPanel>((ItemsControl)updates.FindName("RunningItemsControl")).Any(),
+            "The active-only tile layout did not show all running components with their progress");
+        shell.Preferences.UseUpdateTiles = false;
         shell.Navigate(SectionKey.Logs);
         host.Settle();
         Check(status.IsVisible && shell.OperationCaption.Contains("В работе: 4"), "Progress disappeared when navigating away from updates");

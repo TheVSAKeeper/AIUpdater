@@ -9,6 +9,7 @@ internal static class SettingsKeys
     internal const string LastPage = "wpf.shell.last_page";
     internal const string SettingsSection = "wpf.settings.section";
     internal const string TranslationSelection = "wpf.translation.selection";
+    internal const string UpdatesTileLayout = "wpf.updates.tile_layout";
     internal const string UpdatesGroupMode = "wpf.updates.group_mode";
     internal const string UpdatesSortMode = "wpf.updates.sort_mode";
     internal const string UpdatesHideUninstalled = "wpf.updates.hide_uninstalled";

@@ -4,14 +4,44 @@
              xmlns:models="clr-namespace:AIUpdater.Models"
              xmlns:views="clr-namespace:AIUpdater.Views"
              xmlns:icons="http://metro.mahapps.com/winfx/xaml/iconpacks">
-    <UserControl.Resources><BooleanToVisibilityConverter x:Key="BoolVisibility" /></UserControl.Resources>
-    <Border x:Name="CardBorder" BorderThickness="3,0,0,0" Padding="10,7" MinHeight="40" ToolTip="{Binding Stage.ResultDescription}">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolVisibility" />
+        <Style x:Key="TileVersionLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{DynamicResource Font.Size.XS}" />
+            <Setter Property="Foreground" Value="{DynamicResource Fg.Muted}" />
+            <Setter Property="Margin" Value="0,0,0,3" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding DataContext.Preferences.UseUpdateTiles, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+    <Border x:Name="CardBorder" MinHeight="40" ToolTip="{Binding Stage.ResultDescription}">
         <Border.Style>
             <Style TargetType="Border">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="3,0,0,0" />
+                <Setter Property="Padding" Value="10,7" />
                 <Style.Triggers>
+                    <DataTrigger Binding="{Binding DataContext.Preferences.UseUpdateTiles, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}" Value="True">
+                        <Setter Property="Background" Value="{DynamicResource Bg.Surface}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource Border.Default}" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Setter Property="CornerRadius" Value="9" />
+                        <Setter Property="Padding" Value="14,11,14,12" />
+                    </DataTrigger>
                     <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /></Trigger>
+                    <MultiDataTrigger>
+                        <MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding DataContext.Preferences.UseUpdateTiles, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}" Value="True" />
+                            <Condition Binding="{Binding Stage.IsSelectedForUpdate}" Value="True" />
+                        </MultiDataTrigger.Conditions>
+                        <Setter Property="BorderBrush" Value="{DynamicResource Accent.Primary}" />
+                    </MultiDataTrigger>
                     <DataTrigger Binding="{Binding Stage.IsDisabled}" Value="True"><Setter Property="Opacity" Value="0.55" /></DataTrigger>
                     <DataTrigger Binding="{Binding Stage.OperationState}" Value="{x:Static models:OperationState.Checking}"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /><Setter Property="BorderBrush" Value="{DynamicResource Accent.Primary}" /></DataTrigger>
                     <DataTrigger Binding="{Binding Stage.OperationState}" Value="{x:Static models:OperationState.Updating}"><Setter Property="Background" Value="{DynamicResource Bg.SurfaceAlt}" /><Setter Property="BorderBrush" Value="{DynamicResource Accent.Primary}" /></DataTrigger>
@@ -32,16 +62,45 @@
             </ContextMenu>
         </Border.ContextMenu>
         <Grid DataContext="{Binding Stage}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="32" /><ColumnDefinition Width="2.2*" /><ColumnDefinition Width="1.1*" />
                 <ColumnDefinition Width="1.1*" /><ColumnDefinition Width="1.7*" /><ColumnDefinition Width="32" />
             </Grid.ColumnDefinitions>
-            <Grid Visibility="{Binding DataContext.CanStartRun, RelativeSource={RelativeSource AncestorType=views:UpdatesView}, Converter={StaticResource BoolVisibility}}">
+            <Border Grid.Row="2" Grid.ColumnSpan="6" Background="{DynamicResource Bg.Base}" CornerRadius="5" Margin="0,10,0,0"
+                    Visibility="{Binding DataContext.Preferences.UseUpdateTiles, RelativeSource={RelativeSource AncestorType=views:UpdatesView}, Converter={StaticResource BoolVisibility}}" />
+            <Grid Panel.ZIndex="1" Visibility="{Binding DataContext.CanStartRun, RelativeSource={RelativeSource AncestorType=views:UpdatesView}, Converter={StaticResource BoolVisibility}}">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding DataContext.Preferences.UseUpdateTiles, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}" Value="True">
+                                <Setter Property="Grid.Column" Value="4" />
+                                <Setter Property="HorizontalAlignment" Value="Right" />
+                                <Setter Property="Margin" Value="0,0,5,0" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
                 <CheckBox IsChecked="{Binding IsSelectedForUpdate}" Visibility="{Binding CanSelectForUpdate, Converter={StaticResource BoolVisibility}}"
                           IsEnabled="{Binding DataContext.CanStartRun, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}"
                           VerticalAlignment="Center" ToolTip="Выбрать для обновления" AutomationProperties.Name="{Binding Name, StringFormat=Выбрать для обновления: {0}}" />
             </Grid>
-            <Grid Grid.Column="1" Margin="0,0,10,0">
+            <Grid>
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Grid.Column" Value="1" />
+                        <Setter Property="Margin" Value="0,0,10,0" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding DataContext.Preferences.UseUpdateTiles, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}" Value="True">
+                                <Setter Property="Grid.Column" Value="0" />
+                                <Setter Property="Grid.ColumnSpan" Value="5" />
+                                <Setter Property="Margin" Value="0,0,34,0" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
                 <Button Command="{Binding DataContext.SelectOrCheckCommand, RelativeSource={RelativeSource AncestorType=views:StageCardView}}"
                         IsEnabled="{Binding DataContext.CanStartRun, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}"
                         IsHitTestVisible="{Binding IsEnabledForActions}"
@@ -49,16 +108,74 @@
                         ToolTip="{Binding ResultDescription}" AutomationProperties.Name="{Binding CardActionName}" />
                 <StackPanel VerticalAlignment="Center" IsHitTestVisible="False">
                     <TextBlock x:Name="StageTitle" Text="{Binding Name}"
-                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding DataContext.Preferences.UseUpdateTiles, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}" Value="True">
+                                        <Setter Property="FontSize" Value="{DynamicResource Font.Size.M}" />
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
                     <TextBlock Text="{Binding Vendor}" FontSize="{DynamicResource Font.Size.XS}" Foreground="{DynamicResource Fg.Muted}" Margin="0,2,0,0"
                                Visibility="{Binding DataContext.ShowVendorSubtitle, RelativeSource={RelativeSource AncestorType=views:UpdatesView}, Converter={StaticResource BoolVisibility}}" />
                 </StackPanel>
             </Grid>
-            <TextBlock Grid.Column="2" Text="{Binding InstalledVersion, TargetNullValue=–}" Foreground="{DynamicResource Fg.Secondary}"
-                       VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding InstalledVersion}" Margin="0,0,10,0" />
-            <TextBlock x:Name="AvailableVersionText" Grid.Column="3" Text="{Binding AvailableVersionDisplayText}" Foreground="{Binding VersionTargetBrush}"
-                       VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding ResultDescription}" Margin="0,0,10,0" />
-            <StackPanel Grid.Column="4" VerticalAlignment="Center" Margin="0,0,8,0" ToolTip="{Binding ResultDescription}">
+            <StackPanel VerticalAlignment="Center">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Grid.Column" Value="2" />
+                        <Setter Property="Margin" Value="0,0,10,0" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding DataContext.Preferences.UseUpdateTiles, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}" Value="True">
+                                <Setter Property="Grid.Row" Value="2" />
+                                <Setter Property="Grid.Column" Value="0" />
+                                <Setter Property="Grid.ColumnSpan" Value="3" />
+                                <Setter Property="Margin" Value="10,17,8,7" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <TextBlock Text="Установлено" Style="{StaticResource TileVersionLabel}" />
+                <TextBlock Text="{Binding InstalledVersion, TargetNullValue=–}" Foreground="{DynamicResource Fg.Secondary}"
+                           TextTrimming="CharacterEllipsis" ToolTip="{Binding InstalledVersion}" />
+            </StackPanel>
+            <StackPanel VerticalAlignment="Center">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Grid.Column" Value="3" />
+                        <Setter Property="Margin" Value="0,0,10,0" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding DataContext.Preferences.UseUpdateTiles, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}" Value="True">
+                                <Setter Property="Grid.Row" Value="2" />
+                                <Setter Property="Grid.ColumnSpan" Value="3" />
+                                <Setter Property="Margin" Value="10,17,10,7" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <TextBlock Text="Доступно" Style="{StaticResource TileVersionLabel}" />
+                <TextBlock x:Name="AvailableVersionText" Text="{Binding AvailableVersionDisplayText}" Foreground="{Binding VersionTargetBrush}"
+                           TextTrimming="CharacterEllipsis" ToolTip="{Binding ResultDescription}" />
+            </StackPanel>
+            <StackPanel VerticalAlignment="Center" ToolTip="{Binding ResultDescription}">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Grid.Column" Value="4" />
+                        <Setter Property="Margin" Value="0,0,8,0" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding DataContext.Preferences.UseUpdateTiles, RelativeSource={RelativeSource AncestorType=views:UpdatesView}}" Value="True">
+                                <Setter Property="Grid.Row" Value="1" />
+                                <Setter Property="Grid.Column" Value="0" />
+                                <Setter Property="Grid.ColumnSpan" Value="6" />
+                                <Setter Property="Margin" Value="0,5,0,0" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
                 <DockPanel>
                     <Ellipse DockPanel.Dock="Left" Fill="{Binding StatusBrush}" Width="5" Height="5" Margin="0,0,7,0" VerticalAlignment="Center" />
                     <TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
